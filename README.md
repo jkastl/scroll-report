@@ -23,15 +23,26 @@ narrows and fades as it drops toward −20s.
 
 ## Views
 
-**View** switches between two ways of drawing the same history. The choice is remembered.
+The history is a real 3D scene: X runs across the road, time runs back along it, and
+Z lifts off it. **Drag** anywhere on the plot to orbit the camera around it. Horizontal
+drags spin it and vertical drags tilt it, stopping just above the floor. The camera
+stays where you leave it, and the View button then reads **Free**.
 
-- **Drop**: an oblique projection. The record head sits near the top and
-  history falls away down a narrowing lane.
-- **Road** (default): a perspective camera sitting behind and a little to the left of the record
-  head. Recording happens at almost full width near the top, and history travels toward
-  you, widening as it comes, like watching a road roll by. Forward/back (Y) moves a sample
-  along the road, so its gizmo arrow points up the road rather than being drawn to
-  scale.
+**View** glides between the presets. After a drag, the first tap returns to the preset
+you left; after that, taps move on to the next one. The camera is remembered on the
+device.
+
+| Preset | Camera |
+| --- | --- |
+| Road (default) | Behind and above the record head, a little to the left. Recording happens at almost full width near the top, and history rolls toward you, widening as it comes |
+| Chase | High three-quarter view from behind and to the side |
+| Side | Side-on. Time runs right to left and Z is a true vertical. It's the best one in landscape |
+| Top | Straight down: a seismograph strip of X over time |
+| Head-on | Standing past the record head looking back, so history recedes away from you |
+
+Forward/back (Y) nudges a sample along the road. Its true size is small next to the
+time axis, so the Y arrow just shows the direction. The floor shadow and the stalks
+help tell a forward jolt apart from time.
 
 ## Controls
 
@@ -41,7 +52,7 @@ narrows and fades as it drops toward −20s.
 | Invert | Flips all three axes to show the felt force (the push you feel) instead of the device's own movement. Off by default, applies to the existing history too, and is remembered |
 | Keep Awake | Holds a screen wake lock while the page is visible |
 | Smoothing | 0.15s low-pass on all three axes. On by default |
-| View | Switches between Drop and Road |
+| View | Glides to the next camera preset, or back to the last one after a drag |
 | Theme | Cycles Auto → Light → Dark. Auto follows the OS, and the choice is remembered |
 
 ## Signal

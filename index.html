@@ -112,6 +112,8 @@
     min-height: 0;
   }
   canvas {
+    touch-action: none;
+    cursor: grab;
     position: absolute;
     inset: 0;
     width: 100%;
@@ -172,7 +174,7 @@
 
 <header>
   <h1>Scroll Report</h1>
-  <span id="version">v1.3.0 · 2026-09-25</span>
+  <span id="version">v1.4.0 · 2026-09-25</span>
   <span id="status">Waiting</span>
 </header>
 
@@ -207,22 +209,29 @@
   const NO_DATA_MS = 2500;
   const STALL_MS = 3000;
 
-  // Drop view: oblique projection. Y recedes up-and-right, Z lifts straight
-  // up, and older history shrinks toward the bottom to read as receding.
-  const OBL = 0.55;
-  const OBL_COS = Math.cos(Math.PI / 6) * OBL;
-  const OBL_SIN = Math.sin(Math.PI / 6) * OBL;
+  // One 3D scene seen through an orbiting camera. X runs across the road,
+  // history runs back along it (ROAD_LEN at the window's end), Z lifts off
+  // it, and Y nudges a sample along the road.
   const Z_GAIN = 0.7;
-  const RECEDE = 0.45;
+  const ROAD_LEN = 1.2;
+  const Y_DEPTH = 0.16;
+  const AHEAD = 0.3;
+  const NEAR = 0.05;
+  const PITCH_MIN = 0.03;
+  const PITCH_MAX = 1.54;
+  const DRAG_RAD_PER_PX = 0.008;
+  const TWEEN_MS = 450;
 
-  // Road view: pinhole camera behind and above the record head. History
-  // travels from depth D_FAR toward the viewer at D_NEAR, and Y nudges a
-  // sample along the road. The camera sits a little left of the lane so
-  // depth reads as a diagonal instead of hiding behind the Z axis.
-  const D_FAR = 1;
-  const D_NEAR = 0.42;
-  const Y_DEPTH = 0.08;
-  const CAM_X = -0.15;
+  // tf: where along the road the camera aims (fraction of the window).
+  // oy: where that aim point lands on screen (fraction of the height).
+  // aspect: how wide the scene is, so the zoom can use landscape width.
+  const PRESETS = [
+    { id: 'road', label: 'Road', yaw: 0.12, pitch: 0.62, dist: 1.7, tf: 0.02, zoom: 1.55, oy: 0.24, aspect: 0.75 },
+    { id: 'chase', label: 'Chase', yaw: 0.75, pitch: 0.55, dist: 2.2, tf: 0.4, zoom: 1.25, oy: 0.5, aspect: 1.3 },
+    { id: 'side', label: 'Side', yaw: -Math.PI / 2, pitch: 0.18, dist: 2.2, tf: 0.45, zoom: 1.3, oy: 0.64, aspect: 2.6 },
+    { id: 'top', label: 'Top', yaw: 0, pitch: PITCH_MAX, dist: 2.4, tf: 0.42, zoom: 1.35, oy: 0.5, aspect: 0.75 },
+    { id: 'head', label: 'Head-on', yaw: Math.PI, pitch: 0.32, dist: 1.1, tf: 0.1, zoom: 0.9, oy: 0.42, aspect: 1.6 },
+  ];
 
   const $ = id => document.getElementById(id);
   const canvas = $('canvas');
@@ -245,16 +254,23 @@
   let binX, binY, binZ, binN;
 
   let W = 0, H = 0, dpr = 1;
-  let cx = 0, headY = 0, span = 0, scale = 1, horizonY = 0, camK = 0, vpX = 0;
-  let PX = 0, PY = 0;
+  let PX = 0, PY = 0, PZ = 0, PV = true;
+  let cam = { ...PRESETS[0] };
+  let presetIdx = 0, customCam = false, tween = null, drag = null;
+  const C = {};
   let colors = {};
 
   let started = false, hidden = false;
   let optSmooth = true, optWake = false, optInvert = false;
   let theme = document.documentElement.dataset.theme || 'auto';
-  let view = 'road';
   try {
-    if (localStorage.getItem('scroll-report-view') === 'drop') view = 'drop';
+    const saved = JSON.parse(localStorage.getItem('scroll-report-cam') || 'null');
+    const i = saved ? PRESETS.findIndex(p => p.id === saved.preset) : -1;
+    if (i >= 0) { presetIdx = i; cam = { ...PRESETS[i] }; }
+    if (saved && saved.custom) {
+      for (const k of ['yaw', 'pitch']) if (typeof saved[k] === 'number') cam[k] = saved[k];
+      customCam = true;
+    }
     optInvert = localStorage.getItem('scroll-report-invert') === '1';
   } catch (e) {}
   let wakeLock = null;
@@ -327,47 +343,23 @@
 
   // Geometry
 
-  const VIEWS = {
-    drop: {
-      label: 'Drop',
-      ahead: 0,
-      yAxis: [0, FULL_G * 0.9, 0, 0],
-      layout() {
-        scale = Math.min(W * 0.3, H * 0.16, 240) / FULL_G;
-        headY = Math.max(FULL_G * scale * Z_GAIN + 24, H * 0.2);
-        span = H - headY - 12;
-      },
-      project(x, y, z, f) {
-        const k = (1 - RECEDE * f) * scale;
-        PX = cx + k * (x + y * OBL_COS);
-        PY = headY + span * f - k * (y * OBL_SIN + z * Z_GAIN);
-      },
-      width: (t, f) => 1 + 2.2 * t,
-      alpha: t => 0.2 + 0.8 * t * t,
-    },
-    road: {
-      label: 'Road',
-      ahead: 0.6,
-      // Y's true depth offset is only a few pixels here, so the gizmo points
-      // up the road instead of drawing it to scale.
-      yAxis: [0, 0, 0, -0.3],
-      layout() {
-        scale = Math.min(W * 0.42, H * 0.4) / FULL_G;
-        headY = Math.max(FULL_G * scale * Z_GAIN / D_FAR + 20, H * 0.2);
-        span = H - headY;
-        camK = span / (1 / D_NEAR - 1 / D_FAR);
-        horizonY = headY - camK / D_FAR;
-        vpX = cx + scale * CAM_X / D_FAR;
-      },
-      project(x, y, z, f) {
-        const d = Math.max(D_FAR - (D_FAR - D_NEAR) * f + y * Y_DEPTH, 0.05);
-        PX = vpX + scale * (x - CAM_X) / d;
-        PY = horizonY + (camK - scale * z * Z_GAIN) / d;
-      },
-      width: (t, f) => 1.6 * D_FAR / (D_FAR - (D_FAR - D_NEAR) * f),
-      alpha: t => 0.3 + 0.7 * t,
-    },
-  };
+  // Camera
+
+  function updateCamera() {
+    const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
+    const cyw = Math.cos(cam.yaw), syw = Math.sin(cam.yaw);
+    C.fx = syw * cp; C.fy = cyw * cp; C.fz = -sp;
+    C.rx = cyw; C.ry = -syw;
+    C.ux = C.ry * C.fz; C.uy = -C.rx * C.fz; C.uz = C.rx * C.fy - C.ry * C.fx;
+    C.px = -cam.dist * C.fx;
+    C.py = -cam.tf * ROAD_LEN - cam.dist * C.fy;
+    C.pz = -cam.dist * C.fz;
+    C.cx = W / 2;
+    C.cy = H * cam.oy;
+    C.focal = cam.zoom * Math.min(W, H * cam.aspect);
+    project(0, 0, 0, 0);
+    C.ref = PZ;
+  }
 
   function resize() {
     const r = canvas.getBoundingClientRect();
@@ -378,27 +370,75 @@
     canvas.width = Math.round(W * dpr);
     canvas.height = Math.round(H * dpr);
 
-    cx = W / 2;
-    VIEWS[view].layout();
-
-    const bins = Math.max(8, Math.ceil(span / BIN_PX));
+    const bins = Math.max(8, Math.ceil(Math.max(W, H) / BIN_PX));
     binX = new Float32Array(bins);
     binY = new Float32Array(bins);
     binZ = new Float32Array(bins);
     binN = new Uint16Array(bins);
+    updateCamera();
     draw();
   }
 
-  function applyView() {
-    btnView.textContent = 'View: ' + VIEWS[view].label;
-    try { localStorage.setItem('scroll-report-view', view); } catch (e) {}
-    resize();
+  function redraw() {
+    updateCamera();
+    if (!rafId) draw();
   }
 
+  function saveCam() {
+    btnView.textContent = 'View: ' + (customCam ? 'Free' : PRESETS[presetIdx].label);
+    try {
+      localStorage.setItem('scroll-report-cam', JSON.stringify({
+        preset: PRESETS[presetIdx].id, custom: customCam, yaw: cam.yaw, pitch: cam.pitch,
+      }));
+    } catch (e) {}
+  }
+
+  function tweenStep() {
+    if (!tween) return;
+    const t = Math.min((performance.now() - tween.t0) / TWEEN_MS, 1);
+    const e = t * t * (3 - 2 * t);
+    for (const k of ['pitch', 'dist', 'tf', 'zoom', 'oy', 'aspect']) {
+      cam[k] = tween.from[k] + (tween.to[k] - tween.from[k]) * e;
+    }
+    cam.yaw = tween.from.yaw + tween.dYaw * e;
+    redraw();
+    if (t < 1) requestAnimationFrame(tweenStep); else tween = null;
+  }
+
+  // After a drag the button returns to the preset you left; otherwise it
+  // moves on to the next one.
   btnView.addEventListener('click', () => {
-    view = view === 'drop' ? 'road' : 'drop';
-    applyView();
+    if (!customCam) presetIdx = (presetIdx + 1) % PRESETS.length;
+    customCam = false;
+    const to = PRESETS[presetIdx];
+    const dYaw = ((to.yaw - cam.yaw) % (2 * Math.PI) + 3 * Math.PI) % (2 * Math.PI) - Math.PI;
+    tween = { from: { ...cam }, to, dYaw, t0: performance.now() };
+    saveCam();
+    requestAnimationFrame(tweenStep);
   });
+
+  canvas.addEventListener('pointerdown', e => {
+    if (drag) return;
+    drag = { id: e.pointerId, x: e.clientX, y: e.clientY };
+    canvas.setPointerCapture(e.pointerId);
+    tween = null;
+  });
+  canvas.addEventListener('pointermove', e => {
+    if (!drag || e.pointerId !== drag.id) return;
+    cam.yaw += (e.clientX - drag.x) * DRAG_RAD_PER_PX;
+    cam.pitch = Math.min(PITCH_MAX, Math.max(PITCH_MIN, cam.pitch + (e.clientY - drag.y) * DRAG_RAD_PER_PX));
+    drag.x = e.clientX;
+    drag.y = e.clientY;
+    if (!customCam) { customCam = true; saveCam(); }
+    redraw();
+  });
+  const endDrag = e => {
+    if (!drag || e.pointerId !== drag.id) return;
+    drag = null;
+    saveCam();
+  };
+  canvas.addEventListener('pointerup', endDrag);
+  canvas.addEventListener('pointercancel', endDrag);
 
   function clampG(v) {
     return v > CLAMP_G ? CLAMP_G : v < -CLAMP_G ? -CLAMP_G : v;
@@ -498,7 +538,14 @@
   }
 
   function project(x, y, z, f) {
-    VIEWS[view].project(x, y, z, f);
+    const wx = x - C.px;
+    const wy = y * Y_DEPTH - f * ROAD_LEN - C.py;
+    const wz = z * Z_GAIN - C.pz;
+    PZ = wx * C.fx + wy * C.fy + wz * C.fz;
+    PV = PZ > NEAR;
+    const k = C.focal / (PV ? PZ : NEAR);
+    PX = C.cx + k * (wx * C.rx + wy * C.ry);
+    PY = C.cy - k * (wx * C.ux + wy * C.uy + wz * C.uz);
   }
 
   function line(x0, y0, x1, y1) {
@@ -508,32 +555,33 @@
     ctx.stroke();
   }
 
-  function poly(pts) {
+  // Shapes that reach behind the camera are skipped rather than clipped.
+  function fillPoly(pts) {
     ctx.beginPath();
     for (let i = 0; i < pts.length; i++) {
       project(pts[i][0], pts[i][1], pts[i][2], pts[i][3]);
+      if (!PV) return;
       if (i) ctx.lineTo(PX, PY); else ctx.moveTo(PX, PY);
     }
+    ctx.fill();
   }
 
   function seg(x0, y0, z0, f0, x1, y1, z1, f1) {
     project(x0, y0, z0, f0);
+    if (!PV) return;
     const ax = PX, ay = PY;
     project(x1, y1, z1, f1);
-    line(ax, ay, PX, PY);
+    if (PV) line(ax, ay, PX, PY);
   }
 
   function drawFloor(now) {
     const F = FULL_G;
-    const ahead = -VIEWS[view].ahead;
+    const ahead = -AHEAD;
 
     ctx.fillStyle = colors.floor;
-    poly([[-F, -F, 0, 0], [F, -F, 0, 0], [F, F, 0, 0], [-F, F, 0, 0]]);
-    ctx.fill();
-
-    poly([[-F, 0, 0, ahead], [F, 0, 0, ahead], [F, 0, 0, 1], [-F, 0, 0, 1]]);
+    fillPoly([[-F, -F, 0, 0], [F, -F, 0, 0], [F, F, 0, 0], [-F, F, 0, 0]]);
     ctx.globalAlpha = 0.55;
-    ctx.fill();
+    fillPoly([[-F, 0, 0, ahead], [F, 0, 0, ahead], [F, 0, 0, 1], [-F, 0, 0, 1]]);
     ctx.globalAlpha = 1;
 
     ctx.strokeStyle = colors.grid;
@@ -562,25 +610,34 @@
     for (let s = 5; s * 1000 <= WINDOW_MS; s += 5) {
       const label = '−' + s + 's';
       project(-F, 0, 0, s * 1000 / WINDOW_MS);
+      if (!PV) continue;
       const x = Math.max(PX - 6, ctx.measureText(label).width + 4);
       ctx.fillText(label, x, Math.min(PY - (x > PX - 6 ? 8 : 0), H - 8));
     }
     ctx.textAlign = 'left';
     project(F, 0, 0, 0);
-    ctx.fillText(F + 'G', Math.min(PX + 4, W - 30), PY + 8);
+    if (PV) ctx.fillText(F + 'G', Math.min(PX + 4, W - 30), PY + 8);
   }
 
   function drawAxes() {
     const L = FULL_G * 0.9;
     project(0, 0, 0, 0);
     const ox = PX, oy = PY;
-    const axes = [['X', colors.x, L, 0, 0, 0], ['Y', colors.y, ...VIEWS[view].yAxis], ['Z', colors.z, 0, 0, L, 0]];
+    if (!PV) return;
+    // Equal-length arrows. Y's true depth offset is tiny, so its arrow just
+    // points up the road.
+    const axes = [
+      ['X', colors.x, L, 0, 0, 0],
+      ['Y', colors.y, 0, 0, 0, -L / ROAD_LEN],
+      ['Z', colors.z, 0, 0, L / Z_GAIN, 0],
+    ];
     ctx.lineWidth = 1.5;
     ctx.font = '600 11px -apple-system, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     for (const [label, color, x, y, z, f] of axes) {
       project(x, y, z, f);
+      if (!PV) continue;
       ctx.strokeStyle = color;
       ctx.globalAlpha = 0.6;
       line(ox, oy, PX, PY);
@@ -622,7 +679,6 @@
   function drawRibbon(now) {
     const { bins, offset } = binHistory(now);
     const fAt = b => (b + offset) / bins;
-    const v = VIEWS[view];
 
     const shadowPath = new Path2D();
     const stalkPath = new Path2D();
@@ -632,12 +688,13 @@
       const f = fAt(b);
       if (f > 1) continue;
       project(binX[b], binY[b], 0, f);
+      if (!PV) { pen = false; continue; }
       if (pen) shadowPath.lineTo(PX, PY); else shadowPath.moveTo(PX, PY);
       pen = true;
       if (b % 6 === 0) {
         stalkPath.moveTo(PX, PY);
         project(binX[b], binY[b], binZ[b], f);
-        stalkPath.lineTo(PX, PY);
+        if (PV) stalkPath.lineTo(PX, PY);
       }
     }
     ctx.lineCap = 'round';
@@ -659,14 +716,19 @@
       if (fm > 1) continue;
       ctx.beginPath();
       let drawing = false;
+      let depth = 0, n = 0;
       for (let b = hi; b >= lo; b--) {
         if (!binN[b] || fAt(b) > 1) { drawing = false; continue; }
         project(binX[b], binY[b], binZ[b], fAt(b));
+        if (!PV) { drawing = false; continue; }
+        depth += PZ; n++;
         if (drawing) ctx.lineTo(PX, PY); else ctx.moveTo(PX, PY);
         drawing = true;
       }
-      ctx.strokeStyle = lerpColor(1 - fm, v.alpha(1 - fm));
-      ctx.lineWidth = v.width(1 - fm, fm);
+      if (!n) continue;
+      ctx.strokeStyle = lerpColor(1 - fm, 0.3 + 0.7 * (1 - fm));
+      // Nearer history draws thicker, whichever way the camera faces.
+      ctx.lineWidth = Math.min(4.5, Math.max(0.8, 1.8 * C.ref / (depth / n)));
       ctx.stroke();
     }
 
@@ -676,8 +738,10 @@
     const inv = optInvert ? -1 : 1;
     const x = clampG(inv * bufX[k]), y = clampG(inv * bufY[k]), z = clampG(inv * bufZ[k]);
     project(x, y, 0, 0);
+    if (!PV) return;
     const gx = PX, gy = PY;
     project(x, y, z, 0);
+    if (!PV) return;
     const hx = PX, hy = PY;
 
     ctx.strokeStyle = colors.shadow;
@@ -830,7 +894,8 @@
 
   readColors();
   btnTheme.textContent = 'Theme: ' + theme[0].toUpperCase() + theme.slice(1);
-  applyView();
+  saveCam();
+  resize();
 })();
 </script>
 </body>
