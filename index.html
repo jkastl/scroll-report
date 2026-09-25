@@ -136,21 +136,21 @@
   #start[hidden] { display: none; }
   nav {
     display: flex;
-    gap: 6px;
-    padding: 8px 16px calc(8px + env(safe-area-inset-bottom));
+    gap: 4px;
+    padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
     border-top: 1px solid var(--line);
     background: var(--panel);
   }
   nav button {
-    flex: 1 1 0;
+    flex: 1 1 auto;
     min-width: 0;
-    padding: 9px 4px;
+    padding: 9px 5px;
     border-radius: 9px;
     border: 1px solid var(--line);
     background: transparent;
     color: var(--fg);
     font: inherit;
-    font-size: 13px;
+    font-size: clamp(10px, 3.1vw, 13px);
     white-space: nowrap;
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
@@ -172,7 +172,7 @@
 
 <header>
   <h1>Scroll Report</h1>
-  <span id="version">v1.1.0 · 2026-09-25</span>
+  <span id="version">v1.2.0 · 2026-09-25</span>
   <span id="status">Waiting</span>
 </header>
 
@@ -182,6 +182,7 @@
 </main>
 
 <nav>
+  <button id="btn-pause" aria-pressed="false" disabled>Pause</button>
   <button id="btn-wake" aria-pressed="false">Keep Awake</button>
   <button id="btn-smooth" aria-pressed="true">Smoothing</button>
   <button id="btn-view">View: Drop</button>
@@ -229,6 +230,7 @@
   const startBtn = $('start');
   const btnWake = $('btn-wake');
   const btnSmooth = $('btn-smooth');
+  const btnPause = $('btn-pause');
   const btnTheme = $('btn-theme');
   const btnView = $('btn-view');
 
@@ -259,6 +261,7 @@
   let fallback = false, stalled = false, noData = false;
   let flashUntil = 0;
   let rafId = 0;
+  let paused = false, pausedAt = 0, pausedTotal = 0;
 
   function setStatus(text, cls) {
     statusEl.textContent = text;
@@ -268,6 +271,7 @@
   function refreshStatus() {
     if (performance.now() < flashUntil) return;
     if (!started) setStatus('Waiting');
+    else if (paused) setStatus('Paused');
     else if (noData) setStatus('No sensor data', 'err');
     else if (stalled) setStatus('Sensor stalled', 'warn');
     else if (fallback) setStatus('Live · est. gravity', 'warn');
@@ -404,7 +408,14 @@
     return so && typeof so.angle === 'number' ? so.angle : 0;
   }
 
+  // The timeline clock stops while paused, so resuming picks up exactly where
+  // the frozen history left off instead of leaving a gap.
+  function clock() {
+    return (paused ? pausedAt : performance.now()) - pausedTotal;
+  }
+
   function onMotion(e) {
+    if (paused) return;
     const now = performance.now();
     const dt = lastSample ? Math.min((now - lastSample) / 1000, 0.25) : 1 / 60;
     lastSample = now;
@@ -464,7 +475,7 @@
     bufX[head] = x;
     bufY[head] = y;
     bufZ[head] = z;
-    bufT[head] = now;
+    bufT[head] = now - pausedTotal;
     head = (head + 1) % CAP;
     if (count < CAP) count++;
 
@@ -684,7 +695,7 @@
 
   function draw() {
     if (!W || !binN) return;
-    const now = performance.now();
+    const now = clock();
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = colors.bg;
     ctx.fillRect(0, 0, W, H);
@@ -703,7 +714,7 @@
   }
 
   function startLoop() {
-    if (!rafId && started && !hidden) rafId = requestAnimationFrame(frame);
+    if (!rafId && started && !hidden && !paused) rafId = requestAnimationFrame(frame);
   }
 
   function stopLoop() {
@@ -717,6 +728,7 @@
     started = true;
     startedAt = performance.now();
     startBtn.hidden = true;
+    btnPause.disabled = false;
     window.addEventListener('devicemotion', onMotion);
     refreshStatus();
     startLoop();
@@ -759,6 +771,24 @@
     optWake = !optWake;
     btnWake.setAttribute('aria-pressed', String(optWake));
     if (optWake) acquireWake(); else releaseWake();
+  });
+
+  btnPause.addEventListener('click', () => {
+    paused = !paused;
+    btnPause.textContent = paused ? 'Resume' : 'Pause';
+    btnPause.setAttribute('aria-pressed', String(paused));
+    if (paused) {
+      pausedAt = performance.now();
+      stopLoop();
+      draw();
+    } else {
+      pausedTotal += performance.now() - pausedAt;
+      lastSample = 0;
+      startedAt = performance.now();
+      stalled = false;
+      startLoop();
+    }
+    refreshStatus();
   });
 
   btnSmooth.addEventListener('click', () => {

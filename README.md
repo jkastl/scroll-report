@@ -37,6 +37,7 @@ narrows and fades as it drops toward −20s.
 
 | Button | What it does |
 | --- | --- |
+| Pause / Resume | Freezes the display and stops recording. Resuming carries on from the frozen history with no gap |
 | Keep Awake | Holds a screen wake lock while the page is visible |
 | Smoothing | 0.15s low-pass on all three axes. On by default |
 | View | Switches between Drop and Road |
