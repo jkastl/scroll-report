@@ -16,6 +16,10 @@ The history is drawn as a ribbon on a road:
 - **Y** (green axis): forward/back, sets how fast the road feeds (see below)
 - **Z** (blue axis): up/down, lifts the ribbon off the road
 
+A small **airplane** rides at the record head, nose up the road, and the ribbon trails
+behind it like a contrail. It slides with X and lifts with Z but stays level. It's red
+while live, with a faint pulse, and grey before you start or when the sensor stalls.
+
 The ribbon's grey **shadow** on the road is the same history with Z removed, and the
 thin **stalks** join the two, so height can be read from any angle. The lane edges mark
 ±0.5G, and the chart rules every 2s scroll with the data. Older history fades as it
@@ -52,6 +56,7 @@ neighbours is a moment of forward push. The Y arrow points the way the road feed
 | --- | --- |
 | Pause / Resume | Freezes the display and stops recording. Resuming carries on from the frozen history with no gap |
 | Invert | Flips all three axes to show the felt force (the push you feel) instead of the device's own movement. Off by default, applies to the existing history too, and is remembered |
+| Axes | Shows or hides the X/Y/Z arrows at the record head. On by default, and remembered |
 | Keep Awake | Holds a screen wake lock while the page is visible |
 | Smoothing | 0.15s low-pass on all three axes. On by default |
 | View | Glides to the next camera preset, or back to the last one after a drag |

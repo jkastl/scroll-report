@@ -138,7 +138,7 @@
   #start[hidden] { display: none; }
   nav {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(4, 1fr);
     gap: 4px;
     padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
     border-top: 1px solid var(--line);
@@ -157,6 +157,7 @@
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
   }
+  #btn-view { grid-column: span 2; }
   nav button[aria-pressed="true"] {
     background: color-mix(in srgb, var(--accent) 18%, transparent);
     border-color: var(--accent);
@@ -174,7 +175,7 @@
 
 <header>
   <h1>Scroll Report</h1>
-  <span id="version">v1.5.2 · 2026-09-25</span>
+  <span id="version">v1.6.0 · 2026-09-25</span>
   <span id="status">Waiting</span>
 </header>
 
@@ -187,6 +188,7 @@
   <button id="btn-pause" aria-pressed="false" disabled>Pause</button>
   <button id="btn-invert" aria-pressed="false">Invert</button>
   <button id="btn-smooth" aria-pressed="true">Smoothing</button>
+  <button id="btn-axes" aria-pressed="true">Axes</button>
   <button id="btn-wake" aria-pressed="false">Keep Awake</button>
   <button id="btn-view">View: Road</button>
   <button id="btn-theme">Theme: Auto</button>
@@ -250,6 +252,7 @@
   const btnTheme = $('btn-theme');
   const btnView = $('btn-view');
   const btnInvert = $('btn-invert');
+  const btnAxes = $('btn-axes');
 
   const bufX = new Float32Array(CAP);
   const bufY = new Float32Array(CAP);
@@ -268,7 +271,7 @@
   let colors = {};
 
   let started = false, hidden = false;
-  let optSmooth = true, optWake = false, optInvert = false;
+  let optSmooth = true, optWake = false, optInvert = false, optAxes = true;
   let theme = document.documentElement.dataset.theme || 'auto';
   try {
     const saved = JSON.parse(localStorage.getItem('scroll-report-cam') || 'null');
@@ -279,6 +282,7 @@
       customCam = true;
     }
     optInvert = localStorage.getItem('scroll-report-invert') === '1';
+    optAxes = localStorage.getItem('scroll-report-axes') !== '0';
   } catch (e) {}
   let wakeLock = null;
 
@@ -546,9 +550,13 @@
   }
 
   function project(x, y, z, f) {
+    projectWorld(x, y * Y_DEPTH - f * ROAD_LEN, z * Z_GAIN);
+  }
+
+  function projectWorld(x, y, z) {
     const wx = x - C.px;
-    const wy = y * Y_DEPTH - f * ROAD_LEN - C.py;
-    const wz = z * Z_GAIN - C.pz;
+    const wy = y - C.py;
+    const wz = z - C.pz;
     PZ = wx * C.fx + wy * C.fy + wz * C.fz;
     PV = PZ > NEAR;
     const k = C.focal / (PV ? PZ : NEAR);
@@ -767,37 +775,97 @@
       ctx.lineWidth = Math.min(4.5, Math.max(0.8, 1.8 * C.ref / (depth / n)));
       ctx.stroke();
     }
+  }
 
-    if (!count) return;
-    const k = (head - 1 + CAP) % CAP;
-    if (now - bufT[k] > STALL_MS) return;
-    const inv = optInvert ? -1 : 1;
-    const x = clampG(inv * bufX[k]), z = clampG(inv * bufZ[k]);
-    project(x, 0, 0, 0);
-    if (!PV) return;
-    const gx = PX, gy = PY;
-    project(x, 0, z, 0);
-    if (!PV) return;
-    const hx = PX, hy = PY;
+  // A small level airliner in world units: nose up the road, wings across it.
+  // Each part is a flat polygon; the fuselage is a stroke so it reads side-on.
+  const PLANE = {
+    wing: [[0, 0.05, 0], [0.13, -0.03, 0], [0.13, -0.055, 0], [0, -0.025, 0], [-0.13, -0.055, 0], [-0.13, -0.03, 0]],
+    tail: [[0, -0.085, 0], [0.05, -0.12, 0], [0.05, -0.132, 0], [0, -0.118, 0], [-0.05, -0.132, 0], [-0.05, -0.12, 0]],
+    fin: [[0, -0.075, 0], [0, -0.125, 0.065], [0, -0.14, 0.065], [0, -0.132, 0]],
+    body: [[0, 0.15, 0], [0, -0.135, 0]],
+  };
 
-    ctx.strokeStyle = colors.shadow;
-    ctx.lineWidth = 1;
-    line(gx, gy, hx, hy);
+  const PLANE_SCALE = 0.75;
+
+  function planePath(pts, ox, oy, oz, flat) {
+    ctx.beginPath();
+    let depth = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const [px, py, pz] = pts[i];
+      projectWorld(ox + px * PLANE_SCALE, oy + py * PLANE_SCALE, flat ? 0 : oz + pz * PLANE_SCALE);
+      if (!PV) return -1;
+      depth += PZ;
+      if (i) ctx.lineTo(PX, PY); else ctx.moveTo(PX, PY);
+    }
+    return depth / pts.length;
+  }
+
+  function drawPlane(now) {
+    let x = 0, z = 0, live = false;
+    if (count) {
+      const k = (head - 1 + CAP) % CAP;
+      const inv = optInvert ? -1 : 1;
+      x = clampG(inv * bufX[k]);
+      z = clampG(inv * bufZ[k]);
+      live = started && now - bufT[k] <= STALL_MS;
+    }
+    const ox = x, oy = 0, oz = z * Z_GAIN;
+
     ctx.fillStyle = colors.shadow;
-    ctx.beginPath();
-    ctx.ellipse(gx, gy, 4, 2, 0, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.globalAlpha = 0.35;
+    for (const part of [PLANE.wing, PLANE.tail]) if (planePath(part, ox, oy, 0, true) >= 0) ctx.fill();
+    ctx.globalAlpha = 1;
 
-    const pulse = (now % 1000) / 1000;
-    ctx.strokeStyle = lerpColor(1, 0.5 * (1 - pulse));
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.arc(hx, hy, 5 + pulse * 12, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.fillStyle = lerpColor(1, 1);
-    ctx.beginPath();
-    ctx.arc(hx, hy, 5, 0, Math.PI * 2);
-    ctx.fill();
+    projectWorld(ox, oy, 0);
+    const gx = PX, gy = PY, gv = PV;
+    projectWorld(ox, oy, oz);
+    if (!PV) return;
+    const hx = PX, hy = PY, scale = C.focal / PZ;
+    if (gv) {
+      ctx.strokeStyle = colors.shadow;
+      ctx.lineWidth = 1;
+      line(gx, gy, hx, hy);
+    }
+
+    if (live) {
+      const pulse = (now % 1000) / 1000;
+      ctx.strokeStyle = lerpColor(1, 0.4 * (1 - pulse));
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(hx, hy, (0.08 + pulse * 0.08) * scale, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // Painter's order: farthest part first, whichever side the camera is on.
+    const color = live ? lerpColor(1, 1) : colors.muted;
+    const parts = [];
+    for (const name of ['wing', 'tail', 'fin']) {
+      const d = planePath(PLANE[name], ox, oy, oz, false);
+      if (d >= 0) parts.push([d, name]);
+    }
+    const bd = planePath(PLANE.body, ox, oy, oz, false);
+    if (bd >= 0) parts.push([bd, 'body']);
+    parts.sort((a, b) => b[0] - a[0]);
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    for (const [, name] of parts) {
+      planePath(PLANE[name], ox, oy, oz, false);
+      if (name === 'body') {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = Math.max(2, 0.025 * scale);
+        ctx.stroke();
+      } else {
+        ctx.closePath();
+        ctx.fillStyle = color;
+        ctx.globalAlpha = name === 'fin' ? 0.85 : 1;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = colors.bg;
+        ctx.lineWidth = 0.75;
+        ctx.stroke();
+      }
+    }
   }
 
   function draw() {
@@ -808,8 +876,9 @@
     ctx.fillRect(0, 0, W, H);
     if (started) binHistory(now);
     drawFloor(now);
-    drawAxes();
+    if (optAxes) drawAxes();
     if (started) drawRibbon(now);
+    drawPlane(now);
   }
 
   function frame() {
@@ -907,6 +976,14 @@
     btnInvert.setAttribute('aria-pressed', String(optInvert));
     try { localStorage.setItem('scroll-report-invert', optInvert ? '1' : '0'); } catch (e) {}
     draw();
+  });
+
+  btnAxes.setAttribute('aria-pressed', String(optAxes));
+  btnAxes.addEventListener('click', () => {
+    optAxes = !optAxes;
+    btnAxes.setAttribute('aria-pressed', String(optAxes));
+    try { localStorage.setItem('scroll-report-axes', optAxes ? '1' : '0'); } catch (e) {}
+    if (!rafId) draw();
   });
 
   btnSmooth.addEventListener('click', () => {
