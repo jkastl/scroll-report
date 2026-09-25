@@ -1,8 +1,8 @@
 # Scroll Report
 
-A rolling 3D history of what your phone feels. The record head sits near the top
-of the screen and the last 20 seconds of motion scroll down away from it, like
-paper out of a seismograph.
+A rolling 3D history of what your phone feels. Motion is recorded at the head of a
+road and the last 20 seconds roll back along it toward you, like paper out of a
+seismograph. Drag to look at it from any angle.
 
 **[jkastl.github.io/scroll-report](https://jkastl.github.io/scroll-report/)**
 
@@ -10,16 +10,16 @@ One file, no build step, no dependencies, no network calls.
 
 ## Reading it
 
-Each moment is a 3D point drawn in an oblique projection:
+The history is drawn as a ribbon on a road:
 
-- **X** (red axis): left/right, drawn across the screen
-- **Y** (green axis): forward/back, drawn receding up and to the right
-- **Z** (blue axis): up/down, lifts the ribbon off the floor
+- **X** (red axis): left/right, across the road
+- **Y** (green axis): forward/back, sets how fast the road feeds (see below)
+- **Z** (blue axis): up/down, lifts the ribbon off the road
 
-The ribbon's grey **shadow** on the floor is the same history with Z removed, and
-the thin **stalks** join the two, so height and depth can be told apart. The lane
-edges mark ±0.5G, and the chart rules every 2s scroll with the data. Older history
-narrows and fades as it drops toward −20s.
+The ribbon's grey **shadow** on the road is the same history with Z removed, and the
+thin **stalks** join the two, so height can be read from any angle. The lane edges mark
+±0.5G, and the chart rules every 2s scroll with the data. Older history fades as it
+travels toward −20s.
 
 ## Views
 
