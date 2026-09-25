@@ -174,7 +174,7 @@
 
 <header>
   <h1>Scroll Report</h1>
-  <span id="version">v1.5.1 · 2026-09-25</span>
+  <span id="version">v1.5.2 · 2026-09-25</span>
   <span id="status">Waiting</span>
 </header>
 
@@ -618,9 +618,11 @@
     ctx.textBaseline = 'middle';
     for (let s = 5; s * 1000 <= WINDOW_MS; s += 5) {
       const label = '−' + s + 's';
+      // −20s sits exactly on the road's end, where rounding flips it in and
+      // out every frame, so allow a little slack and pin it to the end.
       const f = feedAt(s * 1000);
-      if (f > 1) continue;
-      project(-F, 0, 0, f);
+      if (f > 1.02) continue;
+      project(-F, 0, 0, Math.min(f, 1));
       if (!PV) continue;
       const x = Math.max(PX - 6, ctx.measureText(label).width + 4);
       ctx.fillText(label, x, Math.min(PY - (x > PX - 6 ? 8 : 0), H - 8));
