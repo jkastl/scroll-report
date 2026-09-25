@@ -21,12 +21,25 @@ the thin **stalks** join the two, so height and depth can be told apart. The lan
 edges mark ±0.5G, and the chart rules every 2s scroll with the data. Older history
 narrows and fades as it drops toward −20s.
 
+## Views
+
+**View** switches between two ways of drawing the same history. The choice is remembered.
+
+- **Drop** (default): an oblique projection. The record head sits near the top and
+  history falls away down a narrowing lane.
+- **Road**: a perspective camera sitting behind and a little to the left of the record
+  head. Recording happens at almost full width near the top, and history travels toward
+  you, widening as it comes, like watching a road roll by. Forward/back (Y) moves a sample
+  along the road, so its gizmo arrow points up the road rather than being drawn to
+  scale.
+
 ## Controls
 
 | Button | What it does |
 | --- | --- |
 | Keep Awake | Holds a screen wake lock while the page is visible |
 | Smoothing | 0.15s low-pass on all three axes. On by default |
+| View | Switches between Drop and Road |
 | Theme | Cycles Auto → Light → Dark. Auto follows the OS, and the choice is remembered |
 
 ## Signal

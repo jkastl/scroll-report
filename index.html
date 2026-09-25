@@ -172,7 +172,7 @@
 
 <header>
   <h1>Scroll Report</h1>
-  <span id="version">v1.0.0 · 2026-09-25</span>
+  <span id="version">v1.1.0 · 2026-09-25</span>
   <span id="status">Waiting</span>
 </header>
 
@@ -184,6 +184,7 @@
 <nav>
   <button id="btn-wake" aria-pressed="false">Keep Awake</button>
   <button id="btn-smooth" aria-pressed="true">Smoothing</button>
+  <button id="btn-view">View: Drop</button>
   <button id="btn-theme">Theme: Auto</button>
 </nav>
 
@@ -204,13 +205,22 @@
   const NO_DATA_MS = 2500;
   const STALL_MS = 3000;
 
-  // Oblique projection: Y recedes up-and-right, Z lifts straight up.
+  // Drop view: oblique projection. Y recedes up-and-right, Z lifts straight
+  // up, and older history shrinks toward the bottom to read as receding.
   const OBL = 0.55;
   const OBL_COS = Math.cos(Math.PI / 6) * OBL;
   const OBL_SIN = Math.sin(Math.PI / 6) * OBL;
   const Z_GAIN = 0.7;
-  // Older history shrinks toward the bottom to read as receding.
   const RECEDE = 0.45;
+
+  // Road view: pinhole camera behind and above the record head. History
+  // travels from depth D_FAR toward the viewer at D_NEAR, and Y nudges a
+  // sample along the road. The camera sits a little left of the lane so
+  // depth reads as a diagonal instead of hiding behind the Z axis.
+  const D_FAR = 1;
+  const D_NEAR = 0.42;
+  const Y_DEPTH = 0.08;
+  const CAM_X = -0.15;
 
   const $ = id => document.getElementById(id);
   const canvas = $('canvas');
@@ -220,6 +230,7 @@
   const btnWake = $('btn-wake');
   const btnSmooth = $('btn-smooth');
   const btnTheme = $('btn-theme');
+  const btnView = $('btn-view');
 
   const bufX = new Float32Array(CAP);
   const bufY = new Float32Array(CAP);
@@ -230,12 +241,15 @@
   let binX, binY, binZ, binN;
 
   let W = 0, H = 0, dpr = 1;
-  let cx = 0, headY = 0, span = 0, scale = 1;
+  let cx = 0, headY = 0, span = 0, scale = 1, horizonY = 0, camK = 0, vpX = 0;
+  let PX = 0, PY = 0;
   let colors = {};
 
   let started = false, hidden = false;
   let optSmooth = true, optWake = false;
   let theme = document.documentElement.dataset.theme || 'auto';
+  let view = 'drop';
+  try { if (localStorage.getItem('scroll-report-view') === 'road') view = 'road'; } catch (e) {}
   let wakeLock = null;
 
   let smX = 0, smY = 0, smZ = 0;
@@ -304,6 +318,48 @@
 
   // Geometry
 
+  const VIEWS = {
+    drop: {
+      label: 'Drop',
+      ahead: 0,
+      yAxis: [0, FULL_G * 0.9, 0, 0],
+      layout() {
+        scale = Math.min(W * 0.3, H * 0.16, 240) / FULL_G;
+        headY = Math.max(FULL_G * scale * Z_GAIN + 24, H * 0.2);
+        span = H - headY - 12;
+      },
+      project(x, y, z, f) {
+        const k = (1 - RECEDE * f) * scale;
+        PX = cx + k * (x + y * OBL_COS);
+        PY = headY + span * f - k * (y * OBL_SIN + z * Z_GAIN);
+      },
+      width: (t, f) => 1 + 2.2 * t,
+      alpha: t => 0.2 + 0.8 * t * t,
+    },
+    road: {
+      label: 'Road',
+      ahead: 0.6,
+      // Y's true depth offset is only a few pixels here, so the gizmo points
+      // up the road instead of drawing it to scale.
+      yAxis: [0, 0, 0, -0.3],
+      layout() {
+        scale = Math.min(W * 0.42, H * 0.4) / FULL_G;
+        headY = Math.max(FULL_G * scale * Z_GAIN / D_FAR + 20, H * 0.2);
+        span = H - headY;
+        camK = span / (1 / D_NEAR - 1 / D_FAR);
+        horizonY = headY - camK / D_FAR;
+        vpX = cx + scale * CAM_X / D_FAR;
+      },
+      project(x, y, z, f) {
+        const d = Math.max(D_FAR - (D_FAR - D_NEAR) * f + y * Y_DEPTH, 0.05);
+        PX = vpX + scale * (x - CAM_X) / d;
+        PY = horizonY + (camK - scale * z * Z_GAIN) / d;
+      },
+      width: (t, f) => 1.6 * D_FAR / (D_FAR - (D_FAR - D_NEAR) * f),
+      alpha: t => 0.3 + 0.7 * t,
+    },
+  };
+
   function resize() {
     const r = canvas.getBoundingClientRect();
     W = r.width;
@@ -313,10 +369,8 @@
     canvas.width = Math.round(W * dpr);
     canvas.height = Math.round(H * dpr);
 
-    scale = Math.min(W * 0.3, H * 0.16, 240) / FULL_G;
     cx = W / 2;
-    headY = Math.max(FULL_G * scale * Z_GAIN + 24, H * 0.2);
-    span = H - headY - 12;
+    VIEWS[view].layout();
 
     const bins = Math.max(8, Math.ceil(span / BIN_PX));
     binX = new Float32Array(bins);
@@ -326,13 +380,16 @@
     draw();
   }
 
-  function sx(x, y, f) {
-    return cx + (1 - RECEDE * f) * scale * (x + y * OBL_COS);
+  function applyView() {
+    btnView.textContent = 'View: ' + VIEWS[view].label;
+    try { localStorage.setItem('scroll-report-view', view); } catch (e) {}
+    resize();
   }
 
-  function sy(y, z, f) {
-    return headY + span * f - (1 - RECEDE * f) * scale * (y * OBL_SIN + z * Z_GAIN);
-  }
+  btnView.addEventListener('click', () => {
+    view = view === 'drop' ? 'road' : 'drop';
+    applyView();
+  });
 
   function clampG(v) {
     return v > CLAMP_G ? CLAMP_G : v < -CLAMP_G ? -CLAMP_G : v;
@@ -424,6 +481,10 @@
       Math.round(c[2] + (h[2] - c[2]) * t) + ',' + alpha.toFixed(3) + ')';
   }
 
+  function project(x, y, z, f) {
+    VIEWS[view].project(x, y, z, f);
+  }
+
   function line(x0, y0, x1, y1) {
     ctx.beginPath();
     ctx.moveTo(x0, y0);
@@ -431,34 +492,40 @@
     ctx.stroke();
   }
 
+  function poly(pts) {
+    ctx.beginPath();
+    for (let i = 0; i < pts.length; i++) {
+      project(pts[i][0], pts[i][1], pts[i][2], pts[i][3]);
+      if (i) ctx.lineTo(PX, PY); else ctx.moveTo(PX, PY);
+    }
+  }
+
+  function seg(x0, y0, z0, f0, x1, y1, z1, f1) {
+    project(x0, y0, z0, f0);
+    const ax = PX, ay = PY;
+    project(x1, y1, z1, f1);
+    line(ax, ay, PX, PY);
+  }
+
   function drawFloor(now) {
     const F = FULL_G;
+    const ahead = -VIEWS[view].ahead;
 
     ctx.fillStyle = colors.floor;
-    ctx.beginPath();
-    ctx.moveTo(sx(-F, -F, 0), sy(-F, 0, 0));
-    ctx.lineTo(sx(F, -F, 0), sy(-F, 0, 0));
-    ctx.lineTo(sx(F, F, 0), sy(F, 0, 0));
-    ctx.lineTo(sx(-F, F, 0), sy(F, 0, 0));
-    ctx.closePath();
+    poly([[-F, -F, 0, 0], [F, -F, 0, 0], [F, F, 0, 0], [-F, F, 0, 0]]);
     ctx.fill();
 
-    ctx.beginPath();
-    ctx.moveTo(sx(-F, 0, 0), sy(0, 0, 0));
-    ctx.lineTo(sx(F, 0, 0), sy(0, 0, 0));
-    ctx.lineTo(sx(F, 0, 1), sy(0, 0, 1));
-    ctx.lineTo(sx(-F, 0, 1), sy(0, 0, 1));
-    ctx.closePath();
+    poly([[-F, 0, 0, ahead], [F, 0, 0, ahead], [F, 0, 0, 1], [-F, 0, 0, 1]]);
     ctx.globalAlpha = 0.55;
     ctx.fill();
     ctx.globalAlpha = 1;
 
     ctx.strokeStyle = colors.grid;
     ctx.lineWidth = 1;
-    line(sx(0, 0, 0), sy(0, 0, 0), sx(0, 0, 1), sy(0, 0, 1));
+    seg(0, 0, 0, ahead, 0, 0, 0, 1);
     ctx.setLineDash([3, 4]);
-    line(sx(-F, 0, 0), sy(0, 0, 0), sx(-F, 0, 1), sy(0, 0, 1));
-    line(sx(F, 0, 0), sy(0, 0, 0), sx(F, 0, 1), sy(0, 0, 1));
+    seg(-F, 0, 0, ahead, -F, 0, 0, 1);
+    seg(F, 0, 0, ahead, F, 0, 0, 1);
     ctx.setLineDash([]);
 
     // Chart-paper rules pinned to absolute time, so they scroll with the data.
@@ -467,7 +534,7 @@
       for (let t = first; t <= now; t += GRID_MS) {
         const f = (now - t) / WINDOW_MS;
         ctx.globalAlpha = 0.9 - f * 0.6;
-        line(sx(-F, 0, f), sy(0, 0, f), sx(F, 0, f), sy(0, 0, f));
+        seg(-F, 0, 0, f, F, 0, 0, f);
       }
       ctx.globalAlpha = 1;
     }
@@ -477,33 +544,34 @@
     ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
     for (let s = 5; s * 1000 <= WINDOW_MS; s += 5) {
-      const f = s * 1000 / WINDOW_MS;
-      ctx.fillText('−' + s + 's', sx(-F, 0, f) - 6, sy(0, 0, f));
+      const label = '−' + s + 's';
+      project(-F, 0, 0, s * 1000 / WINDOW_MS);
+      const x = Math.max(PX - 6, ctx.measureText(label).width + 4);
+      ctx.fillText(label, x, Math.min(PY - (x > PX - 6 ? 8 : 0), H - 8));
     }
     ctx.textAlign = 'left';
-    ctx.fillText(F + 'G', sx(F, 0, 0) + 4, sy(0, 0, 0) + 8);
+    project(F, 0, 0, 0);
+    ctx.fillText(F + 'G', Math.min(PX + 4, W - 30), PY + 8);
   }
 
   function drawAxes() {
     const L = FULL_G * 0.9;
-    const ox = sx(0, 0, 0), oy = sy(0, 0, 0);
-    const axes = [
-      ['X', colors.x, sx(L, 0, 0), sy(0, 0, 0)],
-      ['Y', colors.y, sx(0, L, 0), sy(L, 0, 0)],
-      ['Z', colors.z, sx(0, 0, 0), sy(0, L, 0)],
-    ];
+    project(0, 0, 0, 0);
+    const ox = PX, oy = PY;
+    const axes = [['X', colors.x, L, 0, 0, 0], ['Y', colors.y, ...VIEWS[view].yAxis], ['Z', colors.z, 0, 0, L, 0]];
     ctx.lineWidth = 1.5;
     ctx.font = '600 11px -apple-system, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    for (const [label, color, x, y] of axes) {
+    for (const [label, color, x, y, z, f] of axes) {
+      project(x, y, z, f);
       ctx.strokeStyle = color;
       ctx.globalAlpha = 0.6;
-      line(ox, oy, x, y);
+      line(ox, oy, PX, PY);
       ctx.globalAlpha = 1;
       ctx.fillStyle = color;
-      const d = Math.hypot(x - ox, y - oy) || 1;
-      ctx.fillText(label, x + (x - ox) / d * 9, y + (y - oy) / d * 9);
+      const d = Math.hypot(PX - ox, PY - oy) || 1;
+      ctx.fillText(label, PX + (PX - ox) / d * 9, PY + (PY - oy) / d * 9);
     }
   }
 
@@ -537,6 +605,7 @@
   function drawRibbon(now) {
     const { bins, offset } = binHistory(now);
     const fAt = b => (b + offset) / bins;
+    const v = VIEWS[view];
 
     const shadowPath = new Path2D();
     const stalkPath = new Path2D();
@@ -545,12 +614,13 @@
       if (!binN[b]) { pen = false; continue; }
       const f = fAt(b);
       if (f > 1) continue;
-      const px = sx(binX[b], binY[b], f), py = sy(binY[b], 0, f);
-      if (pen) shadowPath.lineTo(px, py); else shadowPath.moveTo(px, py);
+      project(binX[b], binY[b], 0, f);
+      if (pen) shadowPath.lineTo(PX, PY); else shadowPath.moveTo(PX, PY);
       pen = true;
       if (b % 6 === 0) {
-        stalkPath.moveTo(px, py);
-        stalkPath.lineTo(px, sy(binY[b], binZ[b], f));
+        stalkPath.moveTo(PX, PY);
+        project(binX[b], binY[b], binZ[b], f);
+        stalkPath.lineTo(PX, PY);
       }
     }
     ctx.lineCap = 'round';
@@ -568,35 +638,36 @@
     const BATCH = 8;
     for (let hi = bins - 1; hi > 0; hi -= BATCH) {
       const lo = Math.max(0, hi - BATCH);
-      const t = 1 - fAt((hi + lo) / 2);
-      if (t < 0) continue;
+      const fm = fAt((hi + lo) / 2);
+      if (fm > 1) continue;
       ctx.beginPath();
       let drawing = false;
       for (let b = hi; b >= lo; b--) {
         if (!binN[b] || fAt(b) > 1) { drawing = false; continue; }
-        const f = fAt(b);
-        const px = sx(binX[b], binY[b], f), py = sy(binY[b], binZ[b], f);
-        if (drawing) ctx.lineTo(px, py); else ctx.moveTo(px, py);
+        project(binX[b], binY[b], binZ[b], fAt(b));
+        if (drawing) ctx.lineTo(PX, PY); else ctx.moveTo(PX, PY);
         drawing = true;
       }
-      ctx.strokeStyle = lerpColor(t, 0.2 + 0.8 * t * t);
-      ctx.lineWidth = 1 + 2.2 * t;
+      ctx.strokeStyle = lerpColor(1 - fm, v.alpha(1 - fm));
+      ctx.lineWidth = v.width(1 - fm, fm);
       ctx.stroke();
     }
 
     if (!count) return;
     const k = (head - 1 + CAP) % CAP;
     if (now - bufT[k] > STALL_MS) return;
-    const hx = sx(clampG(bufX[k]), clampG(bufY[k]), 0);
-    const hy = sy(clampG(bufY[k]), clampG(bufZ[k]), 0);
-    const gy = sy(clampG(bufY[k]), 0, 0);
+    const x = clampG(bufX[k]), y = clampG(bufY[k]), z = clampG(bufZ[k]);
+    project(x, y, 0, 0);
+    const gx = PX, gy = PY;
+    project(x, y, z, 0);
+    const hx = PX, hy = PY;
 
     ctx.strokeStyle = colors.shadow;
     ctx.lineWidth = 1;
-    line(hx, gy, hx, hy);
+    line(gx, gy, hx, hy);
     ctx.fillStyle = colors.shadow;
     ctx.beginPath();
-    ctx.ellipse(hx, gy, 4, 2, 0, 0, Math.PI * 2);
+    ctx.ellipse(gx, gy, 4, 2, 0, 0, Math.PI * 2);
     ctx.fill();
 
     const pulse = (now % 1000) / 1000;
@@ -712,7 +783,7 @@
 
   readColors();
   btnTheme.textContent = 'Theme: ' + theme[0].toUpperCase() + theme.slice(1);
-  resize();
+  applyView();
 })();
 </script>
 </body>
