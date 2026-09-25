@@ -174,7 +174,7 @@
 
 <header>
   <h1>Scroll Report</h1>
-  <span id="version">v1.4.0 · 2026-09-25</span>
+  <span id="version">v1.5.0 · 2026-09-25</span>
   <span id="status">Waiting</span>
 </header>
 
@@ -215,6 +215,12 @@
   const Z_GAIN = 0.7;
   const ROAD_LEN = 1.2;
   const Y_DEPTH = 0.16;
+  // Forward acceleration speeds up the paper feed and braking slows it, so
+  // Y shows as history stretched or squeezed along the road.
+  const FEED_GAIN = 2.5;
+  const FEED_MIN = 0.25;
+  const FEED_MAX = 3;
+  const HISTORY_MS = WINDOW_MS / FEED_MIN;
   const AHEAD = 0.3;
   const NEAR = 0.05;
   const PITCH_MIN = 0.03;
@@ -251,7 +257,8 @@
   const bufT = new Float64Array(CAP);
   let head = 0, count = 0;
 
-  let binX, binY, binZ, binN;
+  let binX, binY, binZ, binN, binF;
+  let binMs = 1, binOffset = 0, fed = false;
 
   let W = 0, H = 0, dpr = 1;
   let PX = 0, PY = 0, PZ = 0, PV = true;
@@ -370,11 +377,12 @@
     canvas.width = Math.round(W * dpr);
     canvas.height = Math.round(H * dpr);
 
-    const bins = Math.max(8, Math.ceil(Math.max(W, H) / BIN_PX));
+    const bins = Math.max(8, Math.ceil(Math.max(W, H) / BIN_PX * HISTORY_MS / WINDOW_MS));
     binX = new Float32Array(bins);
     binY = new Float32Array(bins);
     binZ = new Float32Array(bins);
     binN = new Uint16Array(bins);
+    binF = new Float32Array(bins);
     updateCamera();
     draw();
   }
@@ -596,7 +604,8 @@
     if (started) {
       const first = Math.ceil((now - WINDOW_MS) / GRID_MS) * GRID_MS;
       for (let t = first; t <= now; t += GRID_MS) {
-        const f = (now - t) / WINDOW_MS;
+        const f = feedAt(now - t);
+        if (f > 1) continue;
         ctx.globalAlpha = 0.9 - f * 0.6;
         seg(-F, 0, 0, f, F, 0, 0, f);
       }
@@ -609,7 +618,9 @@
     ctx.textBaseline = 'middle';
     for (let s = 5; s * 1000 <= WINDOW_MS; s += 5) {
       const label = '−' + s + 's';
-      project(-F, 0, 0, s * 1000 / WINDOW_MS);
+      const f = feedAt(s * 1000);
+      if (f > 1) continue;
+      project(-F, 0, 0, f);
       if (!PV) continue;
       const x = Math.max(PX - 6, ctx.measureText(label).width + 4);
       ctx.fillText(label, x, Math.min(PY - (x > PX - 6 ? 8 : 0), H - 8));
@@ -650,7 +661,7 @@
 
   function binHistory(now) {
     const bins = binN.length;
-    const binMs = WINDOW_MS / bins;
+    binMs = HISTORY_MS / bins;
     binX.fill(0); binY.fill(0); binZ.fill(0); binN.fill(0);
     // Bins are anchored to absolute time so the ribbon scrolls smoothly
     // instead of reshuffling samples between bins every frame.
@@ -673,27 +684,50 @@
       binY[b] = clampG(inv * binY[b] / n);
       binZ[b] = clampG(inv * binZ[b] / n);
     }
-    return { bins, binMs, offset: now / binMs - newest };
+
+    // binF[b]: how far down the road bin b's older edge has been fed, as a
+    // fraction of the window.
+    binOffset = now / binMs - newest;
+    let pos = 0, prevAge = 0;
+    for (let b = 0; b < bins; b++) {
+      const age = (b + binOffset) * binMs;
+      const speed = binN[b] ? Math.min(FEED_MAX, Math.max(FEED_MIN, 1 + FEED_GAIN * binY[b])) : 1;
+      pos += speed * (age - prevAge);
+      prevAge = age;
+      binF[b] = pos / WINDOW_MS;
+    }
+    fed = true;
+  }
+
+  // Where a moment of the given age sits on the road, after feed stretching.
+  function feedAt(ageMs) {
+    if (!fed) return ageMs / WINDOW_MS;
+    const u = ageMs / binMs - binOffset;
+    const b = Math.max(0, Math.ceil(u));
+    if (b >= binF.length) return Infinity;
+    const age1 = (b + binOffset) * binMs;
+    const age0 = b ? age1 - binMs : 0;
+    const f0 = b ? binF[b - 1] : 0;
+    return f0 + (binF[b] - f0) * (ageMs - age0) / (age1 - age0 || 1);
   }
 
   function drawRibbon(now) {
-    const { bins, offset } = binHistory(now);
-    const fAt = b => (b + offset) / bins;
+    const bins = binN.length;
 
     const shadowPath = new Path2D();
     const stalkPath = new Path2D();
     let pen = false;
     for (let b = bins - 1; b >= 0; b--) {
       if (!binN[b]) { pen = false; continue; }
-      const f = fAt(b);
-      if (f > 1) continue;
-      project(binX[b], binY[b], 0, f);
+      const f = binF[b];
+      if (f > 1) break;
+      project(binX[b], 0, 0, f);
       if (!PV) { pen = false; continue; }
       if (pen) shadowPath.lineTo(PX, PY); else shadowPath.moveTo(PX, PY);
       pen = true;
       if (b % 6 === 0) {
         stalkPath.moveTo(PX, PY);
-        project(binX[b], binY[b], binZ[b], f);
+        project(binX[b], 0, binZ[b], f);
         if (PV) stalkPath.lineTo(PX, PY);
       }
     }
@@ -712,14 +746,14 @@
     const BATCH = 8;
     for (let hi = bins - 1; hi > 0; hi -= BATCH) {
       const lo = Math.max(0, hi - BATCH);
-      const fm = fAt((hi + lo) / 2);
-      if (fm > 1) continue;
+      const fm = Math.min(1, (binF[hi] + binF[lo]) / 2);
+      if (binF[lo] > 1) continue;
       ctx.beginPath();
       let drawing = false;
       let depth = 0, n = 0;
       for (let b = hi; b >= lo; b--) {
-        if (!binN[b] || fAt(b) > 1) { drawing = false; continue; }
-        project(binX[b], binY[b], binZ[b], fAt(b));
+        if (!binN[b] || binF[b] > 1) { drawing = false; continue; }
+        project(binX[b], 0, binZ[b], binF[b]);
         if (!PV) { drawing = false; continue; }
         depth += PZ; n++;
         if (drawing) ctx.lineTo(PX, PY); else ctx.moveTo(PX, PY);
@@ -736,11 +770,11 @@
     const k = (head - 1 + CAP) % CAP;
     if (now - bufT[k] > STALL_MS) return;
     const inv = optInvert ? -1 : 1;
-    const x = clampG(inv * bufX[k]), y = clampG(inv * bufY[k]), z = clampG(inv * bufZ[k]);
-    project(x, y, 0, 0);
+    const x = clampG(inv * bufX[k]), z = clampG(inv * bufZ[k]);
+    project(x, 0, 0, 0);
     if (!PV) return;
     const gx = PX, gy = PY;
-    project(x, y, z, 0);
+    project(x, 0, z, 0);
     if (!PV) return;
     const hx = PX, hy = PY;
 
@@ -770,6 +804,7 @@
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = colors.bg;
     ctx.fillRect(0, 0, W, H);
+    if (started) binHistory(now);
     drawFloor(now);
     drawAxes();
     if (started) drawRibbon(now);

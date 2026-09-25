@@ -40,9 +40,11 @@ device.
 | Top | Straight down: a seismograph strip of X over time |
 | Head-on | Standing past the record head looking back, so history recedes away from you |
 
-Forward/back (Y) nudges a sample along the road. Its true size is small next to the
-time axis, so the Y arrow just shows the direction. The floor shadow and the stalks
-help tell a forward jolt apart from time.
+Forward/back (Y) sets the **paper feed speed**. Accelerating forward feeds the road
+faster, so that stretch of history is laid out longer; braking slows the feed and
+squeezes it. The feed runs from ¼× to 3× (+0.4G hits the top). The time labels and 2s
+rules ride along with the stretch, so a gap between rules that's wider than its
+neighbours is a moment of forward push. The Y arrow points the way the road feeds.
 
 ## Controls
 
