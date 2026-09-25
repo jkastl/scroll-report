@@ -25,9 +25,9 @@ narrows and fades as it drops toward −20s.
 
 **View** switches between two ways of drawing the same history. The choice is remembered.
 
-- **Drop** (default): an oblique projection. The record head sits near the top and
+- **Drop**: an oblique projection. The record head sits near the top and
   history falls away down a narrowing lane.
-- **Road**: a perspective camera sitting behind and a little to the left of the record
+- **Road** (default): a perspective camera sitting behind and a little to the left of the record
   head. Recording happens at almost full width near the top, and history travels toward
   you, widening as it comes, like watching a road roll by. Forward/back (Y) moves a sample
   along the road, so its gizmo arrow points up the road rather than being drawn to
@@ -38,6 +38,7 @@ narrows and fades as it drops toward −20s.
 | Button | What it does |
 | --- | --- |
 | Pause / Resume | Freezes the display and stops recording. Resuming carries on from the frozen history with no gap |
+| Invert | Flips all three axes to show the felt force (the push you feel) instead of the device's own movement. Off by default, applies to the existing history too, and is remembered |
 | Keep Awake | Holds a screen wake lock while the page is visible |
 | Smoothing | 0.15s low-pass on all three axes. On by default |
 | View | Switches between Drop and Road |

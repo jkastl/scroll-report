@@ -135,14 +135,14 @@
   }
   #start[hidden] { display: none; }
   nav {
-    display: flex;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
     gap: 4px;
     padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
     border-top: 1px solid var(--line);
     background: var(--panel);
   }
   nav button {
-    flex: 1 1 auto;
     min-width: 0;
     padding: 9px 5px;
     border-radius: 9px;
@@ -172,7 +172,7 @@
 
 <header>
   <h1>Scroll Report</h1>
-  <span id="version">v1.2.0 · 2026-09-25</span>
+  <span id="version">v1.3.0 · 2026-09-25</span>
   <span id="status">Waiting</span>
 </header>
 
@@ -183,9 +183,10 @@
 
 <nav>
   <button id="btn-pause" aria-pressed="false" disabled>Pause</button>
-  <button id="btn-wake" aria-pressed="false">Keep Awake</button>
+  <button id="btn-invert" aria-pressed="false">Invert</button>
   <button id="btn-smooth" aria-pressed="true">Smoothing</button>
-  <button id="btn-view">View: Drop</button>
+  <button id="btn-wake" aria-pressed="false">Keep Awake</button>
+  <button id="btn-view">View: Road</button>
   <button id="btn-theme">Theme: Auto</button>
 </nav>
 
@@ -233,6 +234,7 @@
   const btnPause = $('btn-pause');
   const btnTheme = $('btn-theme');
   const btnView = $('btn-view');
+  const btnInvert = $('btn-invert');
 
   const bufX = new Float32Array(CAP);
   const bufY = new Float32Array(CAP);
@@ -248,10 +250,13 @@
   let colors = {};
 
   let started = false, hidden = false;
-  let optSmooth = true, optWake = false;
+  let optSmooth = true, optWake = false, optInvert = false;
   let theme = document.documentElement.dataset.theme || 'auto';
-  let view = 'drop';
-  try { if (localStorage.getItem('scroll-report-view') === 'road') view = 'road'; } catch (e) {}
+  let view = 'road';
+  try {
+    if (localStorage.getItem('scroll-report-view') === 'drop') view = 'drop';
+    optInvert = localStorage.getItem('scroll-report-invert') === '1';
+  } catch (e) {}
   let wakeLock = null;
 
   let smX = 0, smY = 0, smZ = 0;
@@ -603,12 +608,13 @@
       binZ[b] += bufZ[k];
       binN[b]++;
     }
+    const inv = optInvert ? -1 : 1;
     for (let b = 0; b < bins; b++) {
       const n = binN[b];
       if (!n) continue;
-      binX[b] = clampG(binX[b] / n);
-      binY[b] = clampG(binY[b] / n);
-      binZ[b] = clampG(binZ[b] / n);
+      binX[b] = clampG(inv * binX[b] / n);
+      binY[b] = clampG(inv * binY[b] / n);
+      binZ[b] = clampG(inv * binZ[b] / n);
     }
     return { bins, binMs, offset: now / binMs - newest };
   }
@@ -667,7 +673,8 @@
     if (!count) return;
     const k = (head - 1 + CAP) % CAP;
     if (now - bufT[k] > STALL_MS) return;
-    const x = clampG(bufX[k]), y = clampG(bufY[k]), z = clampG(bufZ[k]);
+    const inv = optInvert ? -1 : 1;
+    const x = clampG(inv * bufX[k]), y = clampG(inv * bufY[k]), z = clampG(inv * bufZ[k]);
     project(x, y, 0, 0);
     const gx = PX, gy = PY;
     project(x, y, z, 0);
@@ -789,6 +796,16 @@
       startLoop();
     }
     refreshStatus();
+  });
+
+  // Invert draws the felt force (what pushes you) instead of the device's
+  // own acceleration. It's applied at draw time so history flips with it.
+  btnInvert.setAttribute('aria-pressed', String(optInvert));
+  btnInvert.addEventListener('click', () => {
+    optInvert = !optInvert;
+    btnInvert.setAttribute('aria-pressed', String(optInvert));
+    try { localStorage.setItem('scroll-report-invert', optInvert ? '1' : '0'); } catch (e) {}
+    draw();
   });
 
   btnSmooth.addEventListener('click', () => {
