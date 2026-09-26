@@ -154,7 +154,6 @@
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
   }
-  #btn-view { grid-column: span 2; }
   nav button[aria-pressed="true"] {
     background: color-mix(in srgb, var(--accent) 18%, transparent);
     border-color: var(--accent);
@@ -172,7 +171,7 @@
 
 <header>
   <h1>Scroll Report</h1>
-  <span id="version">v2.1.0 · 2026-09-26</span>
+  <span id="version">v2.2.0 · 2026-09-26</span>
   <span id="status">Waiting</span>
 </header>
 
@@ -186,6 +185,7 @@
   <button id="btn-invert" aria-pressed="false">Invert</button>
   <button id="btn-smooth" aria-pressed="true">Smoothing</button>
   <button id="btn-axes" aria-pressed="true">Axes</button>
+  <button id="btn-peak" aria-pressed="false">Peak</button>
   <button id="btn-wake" aria-pressed="false">Keep Awake</button>
   <button id="btn-view">View: Road</button>
   <button id="btn-theme">Theme: Auto</button>
@@ -243,6 +243,7 @@
   const btnView = $('btn-view');
   const btnInvert = $('btn-invert');
   const btnAxes = $('btn-axes');
+  const btnPeak = $('btn-peak');
 
   const bufX = new Float32Array(CAP);
   const bufZ = new Float32Array(CAP);
@@ -260,6 +261,8 @@
 
   let started = false, hidden = false;
   let optSmooth = true, optWake = false, optInvert = false, optAxes = true;
+  let optPeak = false;
+  let peakBin = -1;
   let theme = document.documentElement.dataset.theme || 'auto';
   try {
     const saved = JSON.parse(localStorage.getItem('scroll-report-cam') || 'null');
@@ -271,6 +274,7 @@
     }
     optInvert = localStorage.getItem('scroll-report-invert') === '1';
     optAxes = localStorage.getItem('scroll-report-axes') !== '0';
+    optPeak = localStorage.getItem('scroll-report-peak') === '1';
   } catch (e) {}
   let wakeLock = null;
 
@@ -678,6 +682,49 @@
       binX[b] = clampG(inv * binX[b] / n);
       binZ[b] = clampG(inv * binZ[b] / n);
     }
+
+    // The peak only covers what's on the road right now, so it scrolls off
+    // with its moment and hands over to the next biggest.
+    peakBin = -1;
+    let peakM = 0;
+    for (let b = 0; b < bins && binF[b] <= 1; b++) {
+      if (!binN[b]) continue;
+      const m = Math.hypot(binX[b], binZ[b]);
+      if (m > peakM) { peakM = m; peakBin = b; }
+    }
+  }
+
+  function drawPeakPin() {
+    const b = peakBin;
+    if (b < 0) return;
+    const m = Math.hypot(binX[b], binZ[b]);
+    if (m < 0.005) return;
+    const f = binF[b];
+    project(binX[b], 0, f);
+    if (!PV) return;
+    const gx = PX, gy = PY;
+    project(binX[b], binZ[b], f);
+    if (!PV) return;
+    const px = PX, py = PY;
+    const top = Math.min(py, gy) - 26;
+    ctx.strokeStyle = colors.fg;
+    ctx.globalAlpha = 0.7;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
+    line(gx, gy, gx, top);
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+    ctx.beginPath();
+    ctx.arc(px, py, 4, 0, Math.PI * 2);
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.font = '600 11px -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillStyle = colors.fg;
+    const label = '▲ ' + m.toFixed(2) + 'G';
+    const half = ctx.measureText(label).width / 2 + 4;
+    ctx.fillText(label, Math.min(W - half, Math.max(half, gx)), top - 2);
   }
 
   function drawRibbon(now) {
@@ -873,6 +920,7 @@
     drawFloor(now);
     if (optAxes) drawAxes();
     if (started) drawRibbon(now);
+    if (started && optPeak) drawPeakPin();
     drawPlane(now);
   }
 
@@ -971,6 +1019,14 @@
     btnInvert.setAttribute('aria-pressed', String(optInvert));
     try { localStorage.setItem('scroll-report-invert', optInvert ? '1' : '0'); } catch (e) {}
     draw();
+  });
+
+  btnPeak.setAttribute('aria-pressed', String(optPeak));
+  btnPeak.addEventListener('click', () => {
+    optPeak = !optPeak;
+    btnPeak.setAttribute('aria-pressed', String(optPeak));
+    try { localStorage.setItem('scroll-report-peak', optPeak ? '1' : '0'); } catch (e) {}
+    if (!rafId) draw();
   });
 
   btnAxes.setAttribute('aria-pressed', String(optAxes));
