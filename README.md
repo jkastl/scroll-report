@@ -19,7 +19,15 @@ Forward/back isn't recorded. The road already runs that way as time, and giving 
 second meaning made the picture ambiguous.
 
 A small **airplane** rides at the record head, nose up the road, and the ribbon trails
-behind it like a contrail. It slides with X and lifts with Z but stays level. It's red
+behind it like a contrail. It slides with X and lifts with Z. It also gets two "how it felt" cues, which aren't
+the aircraft's real attitude:
+
+- **Lean:** a bank of up to 12° toward the sideways push, following a 0.4s average of X
+  and reaching the cap at 0.3G.
+- **Wobble:** up to 10° of shake, sized by how rough the last half second was. Only
+  quick changes in X and Z count; steady pushes don't.
+
+Invert flips the lean. It's red
 while live, with a faint pulse, and grey before you start or when the sensor stalls.
 
 The ribbon's grey **shadow** on the road is the same history with Z removed, and the

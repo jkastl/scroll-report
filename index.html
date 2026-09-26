@@ -172,7 +172,7 @@
 
 <header>
   <h1>Scroll Report</h1>
-  <span id="version">v2.0.0 · 2026-09-26</span>
+  <span id="version">v2.1.0 · 2026-09-26</span>
   <span id="status">Waiting</span>
 </header>
 
@@ -275,6 +275,7 @@
   let wakeLock = null;
 
   let smX = 0, smZ = 0;
+  let leanX = 0, calmX = 0, calmZ = 0, roughE = 0;
   let gX = 0, gY = 0, gZ = 0, gInit = false;
   let sign = 1;
   let lastSample = 0, startedAt = 0;
@@ -515,6 +516,15 @@
     const f = m > FLOOR_G ? (m - FLOOR_G) / m : 0;
     x *= f; z *= f;
 
+    // Plane attitude cues: a slow average of X for the lean, and the energy
+    // of whatever moves faster than CALM_TAU for the rough-air wobble.
+    leanX += (x - leanX) * (1 - Math.exp(-dt / LEAN_TAU));
+    const kc = 1 - Math.exp(-dt / CALM_TAU);
+    calmX += (rx - calmX) * kc;
+    calmZ += (rz - calmZ) * kc;
+    const hx = rx - calmX, hz = rz - calmZ;
+    roughE += (hx * hx + hz * hz - roughE) * (1 - Math.exp(-dt / ROUGH_TAU));
+
     bufX[head] = x;
     bufZ[head] = z;
     bufT[head] = now - pausedTotal;
@@ -737,12 +747,36 @@
 
   const PLANE_SCALE = 0.75;
 
+  // These are "how it felt" cues, not the aircraft's real attitude: a small
+  // bank toward the sideways push, plus a wobble sized by how rough the last
+  // half second was.
+  const LEAN_TAU = 0.4;
+  const LEAN_MAX = 12 * Math.PI / 180;
+  const LEAN_FULL_G = 0.3;
+  const CALM_TAU = 0.3;
+  const ROUGH_TAU = 0.5;
+  const WOBBLE_MAX = 10 * Math.PI / 180;
+  const ROUGH_FULL_G = 0.15;
+
+  const att = { cr: 1, sr: 0, cp: 1, sp: 0 };
+
+  function setAttitude(roll, pitch) {
+    att.cr = Math.cos(roll); att.sr = Math.sin(roll);
+    att.cp = Math.cos(pitch); att.sp = Math.sin(pitch);
+  }
+
   function planePath(pts, ox, oy, oz, flat) {
     ctx.beginPath();
     let depth = 0;
     for (let i = 0; i < pts.length; i++) {
-      const [px, py, pz] = pts[i];
-      projectWorld(ox + px * PLANE_SCALE, oy + py * PLANE_SCALE, flat ? 0 : oz + pz * PLANE_SCALE);
+      // Roll about the fuselage (right wing down for positive roll), then
+      // pitch about the wings (nose up for positive pitch).
+      const [bx, by, bz] = pts[i];
+      const rx = bx * att.cr + bz * att.sr;
+      const rz = bz * att.cr - bx * att.sr;
+      const py = by * att.cp - rz * att.sp;
+      const pz = rz * att.cp + by * att.sp;
+      projectWorld(ox + rx * PLANE_SCALE, oy + py * PLANE_SCALE, flat ? 0 : oz + pz * PLANE_SCALE);
       if (!PV) return -1;
       depth += PZ;
       if (i) ctx.lineTo(PX, PY); else ctx.moveTo(PX, PY);
@@ -760,6 +794,18 @@
       live = started && now - bufT[k] <= STALL_MS;
     }
     const ox = x, oy = 0, oz = z * Z_GAIN;
+
+    if (live) {
+      const inv = optInvert ? -1 : 1;
+      const lean = LEAN_MAX * Math.max(-1, Math.min(1, inv * leanX / LEAN_FULL_G));
+      const wob = WOBBLE_MAX * Math.min(1, Math.sqrt(roughE) / ROUGH_FULL_G);
+      const t = now / 1000 * 2 * Math.PI;
+      const n1 = 0.6 * Math.sin(t * 1.7) + 0.4 * Math.sin(t * 2.9 + 1);
+      const n2 = 0.6 * Math.sin(t * 2.3 + 2) + 0.4 * Math.sin(t * 3.7);
+      setAttitude(lean + wob * n1, wob * 0.6 * n2);
+    } else {
+      setAttitude(0, 0);
+    }
 
     ctx.fillStyle = colors.shadow;
     ctx.globalAlpha = 0.35;
