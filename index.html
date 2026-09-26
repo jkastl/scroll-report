@@ -133,6 +133,20 @@
     box-shadow: 0 6px 24px color-mix(in srgb, var(--accent) 40%, transparent);
   }
   #start[hidden] { display: none; }
+  #hint {
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 3px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: color-mix(in srgb, var(--panel) 80%, transparent);
+    color: var(--muted);
+    font-size: 11px;
+    white-space: nowrap;
+    pointer-events: none;
+  }
   nav {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
@@ -171,13 +185,14 @@
 
 <header>
   <h1>Scroll Report</h1>
-  <span id="version">v2.4.0 · 2026-09-26</span>
+  <span id="version">v2.5.0 · 2026-09-26</span>
   <span id="status">Waiting</span>
 </header>
 
 <main>
   <canvas id="canvas"></canvas>
   <button id="start">Enable Motion</button>
+  <div id="hint">↻ Drag to rotate</div>
 </main>
 
 <nav>
