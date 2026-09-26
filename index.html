@@ -171,7 +171,7 @@
 
 <header>
   <h1>Scroll Report</h1>
-  <span id="version">v2.2.0 · 2026-09-26</span>
+  <span id="version">v2.3.0 · 2026-09-26</span>
   <span id="status">Waiting</span>
 </header>
 
@@ -261,8 +261,8 @@
 
   let started = false, hidden = false;
   let optSmooth = true, optWake = false, optInvert = false, optAxes = true;
-  let optPeak = false;
-  let peakBin = -1;
+  let optPeak = 'off';
+  let peakBin = -1, peakX = 0, peakZ = 0;
   let theme = document.documentElement.dataset.theme || 'auto';
   try {
     const saved = JSON.parse(localStorage.getItem('scroll-report-cam') || 'null');
@@ -274,7 +274,8 @@
     }
     optInvert = localStorage.getItem('scroll-report-invert') === '1';
     optAxes = localStorage.getItem('scroll-report-axes') !== '0';
-    optPeak = localStorage.getItem('scroll-report-peak') === '1';
+    const pk = localStorage.getItem('scroll-report-peak');
+    optPeak = pk === 'pin' || pk === '1' ? 'pin' : pk === 'lines' ? 'lines' : 'off';
   } catch (e) {}
   let wakeLock = null;
 
@@ -685,12 +686,45 @@
 
     // The peak only covers what's on the road right now, so it scrolls off
     // with its moment and hands over to the next biggest.
-    peakBin = -1;
+    peakBin = -1; peakX = 0; peakZ = 0;
     let peakM = 0;
     for (let b = 0; b < bins && binF[b] <= 1; b++) {
       if (!binN[b]) continue;
+      if (Math.abs(binX[b]) > Math.abs(peakX)) peakX = binX[b];
+      if (Math.abs(binZ[b]) > Math.abs(peakZ)) peakZ = binZ[b];
       const m = Math.hypot(binX[b], binZ[b]);
       if (m > peakM) { peakM = m; peakBin = b; }
+    }
+  }
+
+  // One dashed line per axis along the whole road, on the side that axis
+  // peaked. Labels sit at the −20s end, clear of the plane and axis labels.
+  function drawPeakLines() {
+    const lines = [[peakX, 0, colors.x, 'X'], [0, peakZ, colors.z, 'Z']];
+    ctx.font = '600 10px -apple-system, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    let prev = null;
+    for (const [x, z, color, name] of lines) {
+      const v = name === 'X' ? x : z;
+      if (Math.abs(v) < 0.005) continue;
+      ctx.strokeStyle = color;
+      ctx.globalAlpha = 0.8;
+      ctx.lineWidth = 1.25;
+      ctx.setLineDash([6, 5]);
+      seg(x, z, 0, x, z, 1);
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
+      project(x, z, 1);
+      if (!PV) continue;
+      const label = name + ' ' + (v > 0 ? '+' : '−') + Math.abs(v).toFixed(2) + 'G';
+      const w = ctx.measureText(label).width;
+      const lx = Math.min(W - w - 4, Math.max(4, PX + 6));
+      let ly = Math.min(H - 10, PY - 8);
+      if (prev && lx < prev.x + prev.w && prev.x < lx + w && Math.abs(ly - prev.y) < 12) ly = prev.y - 12;
+      prev = { x: lx, y: ly, w };
+      ctx.fillStyle = color;
+      ctx.fillText(label, lx, ly);
     }
   }
 
@@ -920,7 +954,8 @@
     drawFloor(now);
     if (optAxes) drawAxes();
     if (started) drawRibbon(now);
-    if (started && optPeak) drawPeakPin();
+    if (started && optPeak === 'lines') drawPeakLines();
+    if (started && optPeak === 'pin') drawPeakPin();
     drawPlane(now);
   }
 
@@ -1021,11 +1056,15 @@
     draw();
   });
 
-  btnPeak.setAttribute('aria-pressed', String(optPeak));
+  function showPeak() {
+    btnPeak.textContent = optPeak === 'off' ? 'Peak' : 'Peak: ' + optPeak[0].toUpperCase() + optPeak.slice(1);
+    btnPeak.setAttribute('aria-pressed', String(optPeak !== 'off'));
+  }
+  showPeak();
   btnPeak.addEventListener('click', () => {
-    optPeak = !optPeak;
-    btnPeak.setAttribute('aria-pressed', String(optPeak));
-    try { localStorage.setItem('scroll-report-peak', optPeak ? '1' : '0'); } catch (e) {}
+    optPeak = optPeak === 'off' ? 'pin' : optPeak === 'pin' ? 'lines' : 'off';
+    showPeak();
+    try { localStorage.setItem('scroll-report-peak', optPeak); } catch (e) {}
     if (!rafId) draw();
   });
 

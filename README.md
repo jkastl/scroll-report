@@ -60,7 +60,7 @@ device.
 | --- | --- |
 | Pause / Resume | Freezes the display and stops recording. Resuming carries on from the frozen history with no gap |
 | Invert | Flips both axes to show the felt force (the push you feel) instead of the device's own movement. Off by default, applies to the existing history too, and is remembered |
-| Peak | Pins the biggest moment currently on the road (combined X/Z) with a dashed pole, a ring and its value. The pin scrolls away with its moment and moves to the next biggest. Off by default, and remembered |
+| Peak | Cycles Off → Pin → Lines. **Pin** marks the biggest moment on the road (combined X/Z) with a dashed pole, a ring and its value. **Lines** draws one dashed line per axis along the whole road at that axis's biggest value, on the side it happened, labelled at the −20s end. Both cover only what's on the road, so they update as moments scroll off. Off by default, and remembered |
 | Axes | Shows or hides the X/Z arrows at the record head. On by default, and remembered |
 | Keep Awake | Holds a screen wake lock while the page is visible |
 | Smoothing | 0.15s low-pass on both axes. On by default |
