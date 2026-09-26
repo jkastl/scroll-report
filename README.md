@@ -41,7 +41,7 @@ travels toward −20s.
 The history is a real 3D scene: X runs across the road, time runs back along it, and
 Z lifts off it. **Drag** anywhere on the plot to orbit the camera around it. Horizontal
 drags spin it and vertical drags tilt it, stopping just above the floor. The camera
-stays where you leave it, and the View button then reads **Free**. A small "Drag to rotate" reminder sits at the top of the plot until your first drag, then fades for good.
+stays where you leave it, and the View button then reads **Free**. A small "Drag to rotate" reminder sits at the top of the plot and fades after your first drag on each visit.
 
 **View** glides between the presets. After a drag, the first tap returns to the preset
 you left; after that, taps move on to the next one. The camera is remembered on the

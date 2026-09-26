@@ -190,7 +190,7 @@
 
 <header>
   <h1>Scroll Report</h1>
-  <span id="version">v2.7.0 · 2026-09-26</span>
+  <span id="version">v2.7.1 · 2026-09-26</span>
   <span id="status">Waiting</span>
 </header>
 
@@ -316,9 +316,12 @@
       customCam = true;
     }
   } catch (e) {}
-  if (stored('dragged') === '1') document.documentElement.classList.add('dragged');
-  // v1.x kept the Drop/Road choice here; the camera replaced it.
-  try { localStorage.removeItem('scroll-report-view'); } catch (e) {}
+  // Keys no longer used: v1.x's Drop/Road choice, and v2.6's permanent
+  // dismissal of the drag reminder (it's per visit now).
+  try {
+    localStorage.removeItem('scroll-report-view');
+    localStorage.removeItem('scroll-report-dragged');
+  } catch (e) {}
   let wakeLock = null;
 
   let smX = 0, smZ = 0;
@@ -487,10 +490,7 @@
     drag.x = e.clientX;
     drag.y = e.clientY;
     if (!customCam) { customCam = true; saveCam(); }
-    if (!document.documentElement.classList.contains('dragged')) {
-      document.documentElement.classList.add('dragged');
-      store('dragged', '1');
-    }
+    document.documentElement.classList.add('dragged');
     redraw();
   });
   const endDrag = e => {
