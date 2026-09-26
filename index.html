@@ -24,7 +24,6 @@
     --cold: #3b6fd8;
     --shadow: #8a90a6;
     --ax-x: #d9364c;
-    --ax-y: #1f9d55;
     --ax-z: #2f6fe0;
   }
   :root[data-theme="dark"] {
@@ -43,7 +42,6 @@
     --cold: #4f8dff;
     --shadow: #50577a;
     --ax-x: #ff7a8a;
-    --ax-y: #5fe39a;
     --ax-z: #7aa8ff;
   }
   @media (prefers-color-scheme: dark) {
@@ -63,7 +61,6 @@
       --cold: #4f8dff;
       --shadow: #50577a;
       --ax-x: #ff7a8a;
-      --ax-y: #5fe39a;
       --ax-z: #7aa8ff;
     }
   }
@@ -175,7 +172,7 @@
 
 <header>
   <h1>Scroll Report</h1>
-  <span id="version">v1.6.0 · 2026-09-25</span>
+  <span id="version">v2.0.0 · 2026-09-26</span>
   <span id="status">Waiting</span>
 </header>
 
@@ -212,17 +209,10 @@
   const STALL_MS = 3000;
 
   // One 3D scene seen through an orbiting camera. X runs across the road,
-  // history runs back along it (ROAD_LEN at the window's end), Z lifts off
-  // it, and Y nudges a sample along the road.
+  // history runs back along it (ROAD_LEN at the window's end), and Z lifts
+  // off it. Forward/back isn't recorded.
   const Z_GAIN = 0.7;
   const ROAD_LEN = 1.2;
-  const Y_DEPTH = 0.16;
-  // Forward acceleration speeds up the paper feed and braking slows it, so
-  // Y shows as history stretched or squeezed along the road.
-  const FEED_GAIN = 2.5;
-  const FEED_MIN = 0.25;
-  const FEED_MAX = 3;
-  const HISTORY_MS = WINDOW_MS / FEED_MIN;
   const AHEAD = 0.3;
   const NEAR = 0.05;
   const PITCH_MIN = 0.03;
@@ -255,13 +245,11 @@
   const btnAxes = $('btn-axes');
 
   const bufX = new Float32Array(CAP);
-  const bufY = new Float32Array(CAP);
   const bufZ = new Float32Array(CAP);
   const bufT = new Float64Array(CAP);
   let head = 0, count = 0;
 
-  let binX, binY, binZ, binN, binF;
-  let binMs = 1, binOffset = 0, fed = false;
+  let binX, binZ, binN, binF;
 
   let W = 0, H = 0, dpr = 1;
   let PX = 0, PY = 0, PZ = 0, PV = true;
@@ -286,7 +274,7 @@
   } catch (e) {}
   let wakeLock = null;
 
-  let smX = 0, smY = 0, smZ = 0;
+  let smX = 0, smZ = 0;
   let gX = 0, gY = 0, gZ = 0, gInit = false;
   let sign = 1;
   let lastSample = 0, startedAt = 0;
@@ -329,7 +317,7 @@
     colors = {
       bg: get('--bg'), fg: get('--fg'), muted: get('--muted'),
       grid: get('--grid'), floor: get('--floor'), shadow: get('--shadow'),
-      x: get('--ax-x'), y: get('--ax-y'), z: get('--ax-z'),
+      x: get('--ax-x'), z: get('--ax-z'),
       hot: hexToRgb(get('--hot')), cold: hexToRgb(get('--cold')),
     };
   }
@@ -368,7 +356,7 @@
     C.cx = W / 2;
     C.cy = H * cam.oy;
     C.focal = cam.zoom * Math.min(W, H * cam.aspect);
-    project(0, 0, 0, 0);
+    project(0, 0, 0);
     C.ref = PZ;
   }
 
@@ -381,9 +369,8 @@
     canvas.width = Math.round(W * dpr);
     canvas.height = Math.round(H * dpr);
 
-    const bins = Math.max(8, Math.ceil(Math.max(W, H) / BIN_PX * HISTORY_MS / WINDOW_MS));
+    const bins = Math.max(8, Math.ceil(Math.max(W, H) / BIN_PX));
     binX = new Float32Array(bins);
-    binY = new Float32Array(bins);
     binZ = new Float32Array(bins);
     binN = new Uint16Array(bins);
     binF = new Float32Array(bins);
@@ -511,26 +498,24 @@
       else if (up < -0.3) sign = -1;
     }
 
+    // Screen X still needs the hardware Y axis in landscape; forward/back
+    // itself is dropped here.
     const rx = sign * (ax * c - ay * s);
-    const ry = sign * (ax * s + ay * c);
     const rz = sign * az;
 
     const k = 1 - Math.exp(-dt / SMOOTH_TAU);
     smX += (rx - smX) * k;
-    smY += (ry - smY) * k;
     smZ += (rz - smZ) * k;
 
     let x = optSmooth ? smX : rx;
-    let y = optSmooth ? smY : ry;
     let z = optSmooth ? smZ : rz;
 
     // Soft floor: shrink the vector by FLOOR_G instead of snapping to zero.
-    const m = Math.hypot(x, y, z);
+    const m = Math.hypot(x, z);
     const f = m > FLOOR_G ? (m - FLOOR_G) / m : 0;
-    x *= f; y *= f; z *= f;
+    x *= f; z *= f;
 
     bufX[head] = x;
-    bufY[head] = y;
     bufZ[head] = z;
     bufT[head] = now - pausedTotal;
     head = (head + 1) % CAP;
@@ -549,8 +534,8 @@
       Math.round(c[2] + (h[2] - c[2]) * t) + ',' + alpha.toFixed(3) + ')';
   }
 
-  function project(x, y, z, f) {
-    projectWorld(x, y * Y_DEPTH - f * ROAD_LEN, z * Z_GAIN);
+  function project(x, z, f) {
+    projectWorld(x, -f * ROAD_LEN, z * Z_GAIN);
   }
 
   function projectWorld(x, y, z) {
@@ -575,18 +560,18 @@
   function fillPoly(pts) {
     ctx.beginPath();
     for (let i = 0; i < pts.length; i++) {
-      project(pts[i][0], pts[i][1], pts[i][2], pts[i][3]);
+      project(pts[i][0], pts[i][1], pts[i][2]);
       if (!PV) return;
       if (i) ctx.lineTo(PX, PY); else ctx.moveTo(PX, PY);
     }
     ctx.fill();
   }
 
-  function seg(x0, y0, z0, f0, x1, y1, z1, f1) {
-    project(x0, y0, z0, f0);
+  function seg(x0, z0, f0, x1, z1, f1) {
+    project(x0, z0, f0);
     if (!PV) return;
     const ax = PX, ay = PY;
-    project(x1, y1, z1, f1);
+    project(x1, z1, f1);
     if (PV) line(ax, ay, PX, PY);
   }
 
@@ -595,27 +580,25 @@
     const ahead = -AHEAD;
 
     ctx.fillStyle = colors.floor;
-    fillPoly([[-F, -F, 0, 0], [F, -F, 0, 0], [F, F, 0, 0], [-F, F, 0, 0]]);
     ctx.globalAlpha = 0.55;
-    fillPoly([[-F, 0, 0, ahead], [F, 0, 0, ahead], [F, 0, 0, 1], [-F, 0, 0, 1]]);
+    fillPoly([[-F, 0, ahead], [F, 0, ahead], [F, 0, 1], [-F, 0, 1]]);
     ctx.globalAlpha = 1;
 
     ctx.strokeStyle = colors.grid;
     ctx.lineWidth = 1;
-    seg(0, 0, 0, ahead, 0, 0, 0, 1);
+    seg(0, 0, ahead, 0, 0, 1);
     ctx.setLineDash([3, 4]);
-    seg(-F, 0, 0, ahead, -F, 0, 0, 1);
-    seg(F, 0, 0, ahead, F, 0, 0, 1);
+    seg(-F, 0, ahead, -F, 0, 1);
+    seg(F, 0, ahead, F, 0, 1);
     ctx.setLineDash([]);
 
     // Chart-paper rules pinned to absolute time, so they scroll with the data.
     if (started) {
       const first = Math.ceil((now - WINDOW_MS) / GRID_MS) * GRID_MS;
       for (let t = first; t <= now; t += GRID_MS) {
-        const f = feedAt(now - t);
-        if (f > 1) continue;
+        const f = (now - t) / WINDOW_MS;
         ctx.globalAlpha = 0.9 - f * 0.6;
-        seg(-F, 0, 0, f, F, 0, 0, f);
+        seg(-F, 0, f, F, 0, f);
       }
       ctx.globalAlpha = 1;
     }
@@ -626,38 +609,28 @@
     ctx.textBaseline = 'middle';
     for (let s = 5; s * 1000 <= WINDOW_MS; s += 5) {
       const label = '−' + s + 's';
-      // −20s sits exactly on the road's end, where rounding flips it in and
-      // out every frame, so allow a little slack and pin it to the end.
-      const f = feedAt(s * 1000);
-      if (f > 1.02) continue;
-      project(-F, 0, 0, Math.min(f, 1));
+      project(-F, 0, s * 1000 / WINDOW_MS);
       if (!PV) continue;
       const x = Math.max(PX - 6, ctx.measureText(label).width + 4);
       ctx.fillText(label, x, Math.min(PY - (x > PX - 6 ? 8 : 0), H - 8));
     }
     ctx.textAlign = 'left';
-    project(F, 0, 0, 0);
+    project(F, 0, 0);
     if (PV) ctx.fillText(F + 'G', Math.min(PX + 4, W - 30), PY + 8);
   }
 
   function drawAxes() {
     const L = FULL_G * 0.9;
-    project(0, 0, 0, 0);
+    project(0, 0, 0);
     const ox = PX, oy = PY;
     if (!PV) return;
-    // Equal-length arrows. Y's true depth offset is tiny, so its arrow just
-    // points up the road.
-    const axes = [
-      ['X', colors.x, L, 0, 0, 0],
-      ['Y', colors.y, 0, 0, 0, -L / ROAD_LEN],
-      ['Z', colors.z, 0, 0, L / Z_GAIN, 0],
-    ];
+    const axes = [['X', colors.x, L, 0], ['Z', colors.z, 0, L / Z_GAIN]];
     ctx.lineWidth = 1.5;
     ctx.font = '600 11px -apple-system, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    for (const [label, color, x, y, z, f] of axes) {
-      project(x, y, z, f);
+    for (const [label, color, x, z] of axes) {
+      project(x, z, 0);
       if (!PV) continue;
       ctx.strokeStyle = color;
       ctx.globalAlpha = 0.6;
@@ -671,8 +644,8 @@
 
   function binHistory(now) {
     const bins = binN.length;
-    binMs = HISTORY_MS / bins;
-    binX.fill(0); binY.fill(0); binZ.fill(0); binN.fill(0);
+    const binMs = WINDOW_MS / bins;
+    binX.fill(0); binZ.fill(0); binN.fill(0);
     // Bins are anchored to absolute time so the ribbon scrolls smoothly
     // instead of reshuffling samples between bins every frame.
     const newest = Math.floor(now / binMs);
@@ -682,43 +655,19 @@
       if (b >= bins) break;
       if (b < 0) continue;
       binX[b] += bufX[k];
-      binY[b] += bufY[k];
       binZ[b] += bufZ[k];
       binN[b]++;
     }
     const inv = optInvert ? -1 : 1;
+    const offset = now / binMs - newest;
     for (let b = 0; b < bins; b++) {
+      // binF[b]: bin b's older edge, as a fraction of the way down the road.
+      binF[b] = (b + offset) / bins;
       const n = binN[b];
       if (!n) continue;
       binX[b] = clampG(inv * binX[b] / n);
-      binY[b] = clampG(inv * binY[b] / n);
       binZ[b] = clampG(inv * binZ[b] / n);
     }
-
-    // binF[b]: how far down the road bin b's older edge has been fed, as a
-    // fraction of the window.
-    binOffset = now / binMs - newest;
-    let pos = 0, prevAge = 0;
-    for (let b = 0; b < bins; b++) {
-      const age = (b + binOffset) * binMs;
-      const speed = binN[b] ? Math.min(FEED_MAX, Math.max(FEED_MIN, 1 + FEED_GAIN * binY[b])) : 1;
-      pos += speed * (age - prevAge);
-      prevAge = age;
-      binF[b] = pos / WINDOW_MS;
-    }
-    fed = true;
-  }
-
-  // Where a moment of the given age sits on the road, after feed stretching.
-  function feedAt(ageMs) {
-    if (!fed) return ageMs / WINDOW_MS;
-    const u = ageMs / binMs - binOffset;
-    const b = Math.max(0, Math.ceil(u));
-    if (b >= binF.length) return Infinity;
-    const age1 = (b + binOffset) * binMs;
-    const age0 = b ? age1 - binMs : 0;
-    const f0 = b ? binF[b - 1] : 0;
-    return f0 + (binF[b] - f0) * (ageMs - age0) / (age1 - age0 || 1);
   }
 
   function drawRibbon(now) {
@@ -731,13 +680,13 @@
       if (!binN[b]) { pen = false; continue; }
       const f = binF[b];
       if (f > 1) break;
-      project(binX[b], 0, 0, f);
+      project(binX[b], 0, f);
       if (!PV) { pen = false; continue; }
       if (pen) shadowPath.lineTo(PX, PY); else shadowPath.moveTo(PX, PY);
       pen = true;
       if (b % 6 === 0) {
         stalkPath.moveTo(PX, PY);
-        project(binX[b], 0, binZ[b], f);
+        project(binX[b], binZ[b], f);
         if (PV) stalkPath.lineTo(PX, PY);
       }
     }
@@ -763,7 +712,7 @@
       let depth = 0, n = 0;
       for (let b = hi; b >= lo; b--) {
         if (!binN[b] || binF[b] > 1) { drawing = false; continue; }
-        project(binX[b], 0, binZ[b], binF[b]);
+        project(binX[b], binZ[b], binF[b]);
         if (!PV) { drawing = false; continue; }
         depth += PZ; n++;
         if (drawing) ctx.lineTo(PX, PY); else ctx.moveTo(PX, PY);

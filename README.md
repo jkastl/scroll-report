@@ -10,11 +10,13 @@ One file, no build step, no dependencies, no network calls.
 
 ## Reading it
 
-The history is drawn as a ribbon on a road:
+The history is drawn as a ribbon on a road, with time running back along it:
 
 - **X** (red axis): left/right, across the road
-- **Y** (green axis): forward/back, sets how fast the road feeds (see below)
 - **Z** (blue axis): up/down, lifts the ribbon off the road
+
+Forward/back isn't recorded. The road already runs that way as time, and giving it a
+second meaning made the picture ambiguous.
 
 A small **airplane** rides at the record head, nose up the road, and the ribbon trails
 behind it like a contrail. It slides with X and lifts with Z but stays level. It's red
@@ -44,21 +46,15 @@ device.
 | Top | Straight down: a seismograph strip of X over time |
 | Head-on | Standing past the record head looking back, so history recedes away from you |
 
-Forward/back (Y) sets the **paper feed speed**. Accelerating forward feeds the road
-faster, so that stretch of history is laid out longer; braking slows the feed and
-squeezes it. The feed runs from ¼× to 3× (+0.4G hits the top). The time labels and 2s
-rules ride along with the stretch, so a gap between rules that's wider than its
-neighbours is a moment of forward push. The Y arrow points the way the road feeds.
-
 ## Controls
 
 | Button | What it does |
 | --- | --- |
 | Pause / Resume | Freezes the display and stops recording. Resuming carries on from the frozen history with no gap |
-| Invert | Flips all three axes to show the felt force (the push you feel) instead of the device's own movement. Off by default, applies to the existing history too, and is remembered |
-| Axes | Shows or hides the X/Y/Z arrows at the record head. On by default, and remembered |
+| Invert | Flips both axes to show the felt force (the push you feel) instead of the device's own movement. Off by default, applies to the existing history too, and is remembered |
+| Axes | Shows or hides the X/Z arrows at the record head. On by default, and remembered |
 | Keep Awake | Holds a screen wake lock while the page is visible |
-| Smoothing | 0.15s low-pass on all three axes. On by default |
+| Smoothing | 0.15s low-pass on both axes. On by default |
 | View | Glides to the next camera preset, or back to the last one after a drag |
 | Theme | Cycles Auto → Light → Dark. Auto follows the OS, and the choice is remembered |
 
@@ -70,9 +66,11 @@ neighbours is a moment of forward push. The Y arrow points the way the road feed
 - Sign convention is detected, not assumed from the user agent. The spec's gravity
   reaction points up out of a screen someone is looking at, and iOS reports it (and
   everything else) negated, so its sign decides whether to flip the event.
-- X/Y are rotated from the hardware frame into the screen frame. The angle comes from
-  `window.orientation` first, because iPadOS leaves `screen.orientation.angle` at 0.
-- There's a soft 0.01G noise floor on the 3D magnitude. History is binned by absolute
+- Screen left/right is rotated out of the hardware X/Y axes, so it stays right in
+  landscape. The hardware Y is read for that and for the sign check, but isn't recorded.
+  The angle comes from `window.orientation` first, because iPadOS leaves
+  `screen.orientation.angle` at 0.
+- There's a soft 0.01G noise floor on the X/Z magnitude. History is binned by absolute
   time (the mean per 2px row), so it scrolls smoothly at any sample rate.
 
 ## Development
