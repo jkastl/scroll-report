@@ -190,7 +190,7 @@
 
 <header>
   <h1>Scroll Report</h1>
-  <span id="version">v2.7.1 · 2026-09-26</span>
+  <span id="version">v2.8.0 · 2026-09-26</span>
   <span id="status">Waiting</span>
 </header>
 
@@ -239,17 +239,6 @@
   const PITCH_MAX = 1.54;
   const DRAG_RAD_PER_PX = 0.008;
   const TWEEN_MS = 450;
-
-  // These are "how it felt" cues, not the aircraft's real attitude: a small
-  // bank toward the sideways push, plus a wobble sized by how rough the last
-  // half second was.
-  const LEAN_TAU = 0.4;
-  const LEAN_MAX = 12 * Math.PI / 180;
-  const LEAN_FULL_G = 0.3;
-  const CALM_TAU = 0.3;
-  const ROUGH_TAU = 0.5;
-  const WOBBLE_MAX = 10 * Math.PI / 180;
-  const ROUGH_FULL_G = 0.15;
 
   // tf: where along the road the camera aims (fraction of the window).
   // oy: where that aim point lands on screen (fraction of the height).
@@ -324,8 +313,8 @@
   } catch (e) {}
   let wakeLock = null;
 
-  let smX = 0, smZ = 0;
-  let leanX = 0, calmX = 0, calmZ = 0, roughE = 0;
+  // Two smoothing stages per axis.
+  let s1X = 0, s1Z = 0, s2X = 0, s2Z = 0;
   let gX = 0, gY = 0, gZ = 0, gInit = false;
   let sign = 1;
   let lastSample = 0, startedAt = 0;
@@ -570,26 +559,21 @@
     const rx = sign * (ax * c - ay * s);
     const rz = sign * az;
 
+    // Two low-pass stages in a row roll off runway-rate shake far harder
+    // than one longer stage, for about the same lag on real events.
     const k = 1 - Math.exp(-dt / SMOOTH_TAU);
-    smX += (rx - smX) * k;
-    smZ += (rz - smZ) * k;
+    s1X += (rx - s1X) * k;
+    s1Z += (rz - s1Z) * k;
+    s2X += (s1X - s2X) * k;
+    s2Z += (s1Z - s2Z) * k;
 
-    let x = optSmooth ? smX : rx;
-    let z = optSmooth ? smZ : rz;
+    let x = optSmooth ? s2X : rx;
+    let z = optSmooth ? s2Z : rz;
 
     // Soft floor: shrink the vector by FLOOR_G instead of snapping to zero.
     const m = Math.hypot(x, z);
     const f = m > FLOOR_G ? (m - FLOOR_G) / m : 0;
     x *= f; z *= f;
-
-    // Plane attitude cues: a slow average of X for the lean, and the energy
-    // of whatever moves faster than CALM_TAU for the rough-air wobble.
-    leanX += (x - leanX) * (1 - Math.exp(-dt / LEAN_TAU));
-    const kc = 1 - Math.exp(-dt / CALM_TAU);
-    calmX += (rx - calmX) * kc;
-    calmZ += (rz - calmZ) * kc;
-    const hx = rx - calmX, hz = rz - calmZ;
-    roughE += (hx * hx + hz * hz - roughE) * (1 - Math.exp(-dt / ROUGH_TAU));
 
     bufX[head] = x;
     bufZ[head] = z;
@@ -857,25 +841,12 @@
   const PLANE_SCALE = 0.75;
 
 
-  const att = { cr: 1, sr: 0, cp: 1, sp: 0 };
-
-  function setAttitude(roll, pitch) {
-    att.cr = Math.cos(roll); att.sr = Math.sin(roll);
-    att.cp = Math.cos(pitch); att.sp = Math.sin(pitch);
-  }
-
   function planePath(pts, ox, oy, oz, flat) {
     ctx.beginPath();
     let depth = 0;
     for (let i = 0; i < pts.length; i++) {
-      // Roll about the fuselage (right wing down for positive roll), then
-      // pitch about the wings (nose up for positive pitch).
-      const [bx, by, bz] = pts[i];
-      const rx = bx * att.cr + bz * att.sr;
-      const rz = bz * att.cr - bx * att.sr;
-      const py = by * att.cp - rz * att.sp;
-      const pz = rz * att.cp + by * att.sp;
-      projectWorld(ox + rx * PLANE_SCALE, oy + py * PLANE_SCALE, flat ? 0 : oz + pz * PLANE_SCALE);
+      const [px, py, pz] = pts[i];
+      projectWorld(ox + px * PLANE_SCALE, oy + py * PLANE_SCALE, flat ? 0 : oz + pz * PLANE_SCALE);
       if (!PV) return -1;
       depth += PZ;
       if (i) ctx.lineTo(PX, PY); else ctx.moveTo(PX, PY);
@@ -893,17 +864,6 @@
       live = started && now - bufT[k] <= STALL_MS;
     }
     const ox = x, oy = 0, oz = z * Z_GAIN;
-
-    if (live) {
-      const lean = LEAN_MAX * Math.max(-1, Math.min(1, inv * leanX / LEAN_FULL_G));
-      const wob = reduceMotion.matches ? 0 : WOBBLE_MAX * Math.min(1, Math.sqrt(roughE) / ROUGH_FULL_G);
-      const t = now / 1000 * 2 * Math.PI;
-      const n1 = 0.6 * Math.sin(t * 1.7) + 0.4 * Math.sin(t * 2.9 + 1);
-      const n2 = 0.6 * Math.sin(t * 2.3 + 2) + 0.4 * Math.sin(t * 3.7);
-      setAttitude(lean + wob * n1, wob * 0.6 * n2);
-    } else {
-      setAttitude(0, 0);
-    }
 
     ctx.fillStyle = colors.shadow;
     ctx.globalAlpha = 0.35;

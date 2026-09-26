@@ -19,16 +19,8 @@ Forward/back isn't recorded. The road already runs that way as time, and giving 
 second meaning made the picture ambiguous.
 
 A small **airplane** rides at the record head, nose up the road, and the ribbon trails
-behind it like a contrail. It slides with X and lifts with Z. It also gets two "how it felt" cues, which aren't
-the aircraft's real attitude:
-
-- **Lean:** a bank of up to 12° toward the sideways push, following a 0.4s average of X
-  and reaching the cap at 0.3G.
-- **Wobble:** up to 10° of shake, sized by how rough the last half second was. Only
-  quick changes in X and Z count; steady pushes don't.
-
-Invert flips the lean. It's red
-while live, with a faint pulse, and grey before you start or when the sensor stalls.
+behind it like a contrail. It slides with X and lifts with Z and always stays level. It's
+red while live, with a faint pulse, and grey before you start or when the sensor stalls.
 
 The ribbon's grey **shadow** on the road is the same history with Z removed, and the
 thin **stalks** join the two, so height can be read from any angle. The lane edges mark
@@ -64,7 +56,7 @@ device.
 | Peak | Draws one dashed line per axis along the whole road at that axis's biggest value on the road right now, on the side it happened, labelled at the −20s end. The lines update as moments scroll off. Always starts off |
 | Axes | Shows or hides the X/Z arrows at the record head. On by default, and remembered |
 | Keep Awake | Holds a screen wake lock while the page is visible |
-| Smoothing | 0.15s low-pass on both axes. On by default |
+| Smoothing | Two 0.15s low-pass stages in a row on both axes, which tames runway and engine shake while keeping real bumps. On by default |
 | View | Glides to the next camera preset, or back to the last one after a drag |
 | Theme | Cycles Auto → Light → Dark. Auto follows the OS, and the choice is remembered |
 
@@ -89,8 +81,7 @@ device.
 ## Reduced motion
 
 With the phone's **Reduce Motion** accessibility setting on, View jumps straight to
-each preset instead of gliding, the plane doesn't wobble (it still leans), the live
-ring holds still instead of pulsing, and the drag reminder disappears without fading.
+each preset instead of gliding, the live ring holds still instead of pulsing, and the drag reminder disappears without fading.
 The history still scrolls, since that's the data itself.
 
 ## Development
@@ -105,6 +96,7 @@ Versioning is semver, shown in the header next to the release date.
 
 Things to verify on a real ride. Tick them off or remove them once settled.
 
-- [ ] **Wobble at cruise.** If the plane rocks noticeably in smooth cruise, the wobble
-  threshold is too low. Raise `ROUGH_FULL_G` in `index.html` (currently 0.15G, the
-  roughness that gives the full 10° wobble).
+- [ ] **Take-off smoothing.** Smoothing went from one stage to two after the take-off
+  roll looked jittery. Check it on the next take-off. If it's still busy, raise
+  `SMOOTH_TAU` in `index.html` (currently 0.15s per stage); if real bumps look too soft,
+  lower it.
