@@ -149,6 +149,9 @@
     transition: opacity 0.6s;
   }
   .dragged #hint { opacity: 0; }
+  @media (prefers-reduced-motion: reduce) {
+    #hint { transition: none; }
+  }
   nav {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
@@ -187,7 +190,7 @@
 
 <header>
   <h1>Scroll Report</h1>
-  <span id="version">v2.6.1 · 2026-09-26</span>
+  <span id="version">v2.7.0 · 2026-09-26</span>
   <span id="status">Waiting</span>
 </header>
 
@@ -259,6 +262,8 @@
     { id: 'head', label: 'Head-on', yaw: Math.PI, pitch: 0.32, dist: 1.1, tf: 0.1, zoom: 0.9, oy: 0.42, aspect: 1.6 },
   ];
 
+  const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
+
   const $ = id => document.getElementById(id);
   const canvas = $('canvas');
   const ctx = canvas.getContext('2d');
@@ -312,6 +317,8 @@
     }
   } catch (e) {}
   if (stored('dragged') === '1') document.documentElement.classList.add('dragged');
+  // v1.x kept the Drop/Road choice here; the camera replaced it.
+  try { localStorage.removeItem('scroll-report-view'); } catch (e) {}
   let wakeLock = null;
 
   let smX = 0, smZ = 0;
@@ -445,7 +452,7 @@
 
   function tweenStep() {
     if (!tween) return;
-    const t = Math.min((performance.now() - tween.t0) / TWEEN_MS, 1);
+    const t = reduceMotion.matches ? 1 : Math.min((performance.now() - tween.t0) / TWEEN_MS, 1);
     const e = t * t * (3 - 2 * t);
     for (const k of ['pitch', 'dist', 'tf', 'zoom', 'oy', 'aspect']) {
       cam[k] = tween.from[k] + (tween.to[k] - tween.from[k]) * e;
@@ -515,7 +522,12 @@
 
   function onMotion(e) {
     if (paused) return;
-    const now = performance.now();
+    // Stamp with when the sensor took the reading. Fall back to now if the
+    // stamp is missing or on another clock (old WebKit used epoch ms), and
+    // never step backwards.
+    const ts = e.timeStamp;
+    let now = ts > 0 && Math.abs(performance.now() - ts) < 1000 ? ts : performance.now();
+    if (now < lastSample) now = lastSample;
     const dt = lastSample ? Math.min((now - lastSample) / 1000, 0.25) : 1 / 60;
     lastSample = now;
 
@@ -884,7 +896,7 @@
 
     if (live) {
       const lean = LEAN_MAX * Math.max(-1, Math.min(1, inv * leanX / LEAN_FULL_G));
-      const wob = WOBBLE_MAX * Math.min(1, Math.sqrt(roughE) / ROUGH_FULL_G);
+      const wob = reduceMotion.matches ? 0 : WOBBLE_MAX * Math.min(1, Math.sqrt(roughE) / ROUGH_FULL_G);
       const t = now / 1000 * 2 * Math.PI;
       const n1 = 0.6 * Math.sin(t * 1.7) + 0.4 * Math.sin(t * 2.9 + 1);
       const n2 = 0.6 * Math.sin(t * 2.3 + 2) + 0.4 * Math.sin(t * 3.7);
@@ -910,7 +922,7 @@
     }
 
     if (live) {
-      const pulse = (now % 1000) / 1000;
+      const pulse = reduceMotion.matches ? 0.5 : (now % 1000) / 1000;
       ctx.strokeStyle = lerpColor(1, 0.4 * (1 - pulse));
       ctx.lineWidth = 1.5;
       ctx.beginPath();

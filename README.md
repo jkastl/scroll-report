@@ -80,8 +80,18 @@ device.
   landscape. The hardware Y is read for that and for the sign check, but isn't recorded.
   The angle comes from `window.orientation` first, because iPadOS leaves
   `screen.orientation.angle` at 0.
+- Samples are stamped with the sensor's own event time, not when the code got round
+  to them, so a busy phone doesn't add timing jitter. It falls back to the current time
+  if the stamp is missing or on a different clock.
 - There's a soft 0.01G noise floor on the X/Z magnitude. History is binned by absolute
   time (the mean per 2px row), so it scrolls smoothly at any sample rate.
+
+## Reduced motion
+
+With the phone's **Reduce Motion** accessibility setting on, View jumps straight to
+each preset instead of gliding, the plane doesn't wobble (it still leans), the live
+ring holds still instead of pulsing, and the drag reminder disappears without fading.
+The history still scrolls, since that's the data itself.
 
 ## Development
 
