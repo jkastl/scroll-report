@@ -41,7 +41,7 @@ travels toward −20s.
 The history is a real 3D scene: X runs across the road, time runs back along it, and
 Z lifts off it. **Drag** anywhere on the plot to orbit the camera around it. Horizontal
 drags spin it and vertical drags tilt it, stopping just above the floor. The camera
-stays where you leave it, and the View button then reads **Free**. A small "Drag to rotate" reminder sits at the top of the plot.
+stays where you leave it, and the View button then reads **Free**. A small "Drag to rotate" reminder sits at the top of the plot until your first drag, then fades for good.
 
 **View** glides between the presets. After a drag, the first tap returns to the preset
 you left; after that, taps move on to the next one. The camera is remembered on the
@@ -61,7 +61,7 @@ device.
 | --- | --- |
 | Pause / Resume | Freezes the display and stops recording. Resuming carries on from the frozen history with no gap |
 | Invert | Flips both axes to show the felt force (the push you feel) instead of the device's own movement. Off by default, applies to the existing history too, and is remembered |
-| Peak | Draws one dashed line per axis along the whole road at that axis's biggest value on the road right now, on the side it happened, labelled at the −20s end. The lines update as moments scroll off. Off by default, and remembered |
+| Peak | Draws one dashed line per axis along the whole road at that axis's biggest value on the road right now, on the side it happened, labelled at the −20s end. The lines update as moments scroll off. Always starts off |
 | Axes | Shows or hides the X/Z arrows at the record head. On by default, and remembered |
 | Keep Awake | Holds a screen wake lock while the page is visible |
 | Smoothing | 0.15s low-pass on both axes. On by default |
