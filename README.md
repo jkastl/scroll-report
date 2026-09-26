@@ -32,7 +32,8 @@ while live, with a faint pulse, and grey before you start or when the sensor sta
 
 The ribbon's grey **shadow** on the road is the same history with Z removed, and the
 thin **stalks** join the two, so height can be read from any angle. The lane edges mark
-±0.5G, and the chart rules every 2s scroll with the data. Older history fades as it
+±0.5G for X, a tick on the Z axis marks +0.5G, and the chart rules every 2s scroll with
+the data. Older history fades as it
 travels toward −20s.
 
 ## Views
@@ -60,7 +61,7 @@ device.
 | --- | --- |
 | Pause / Resume | Freezes the display and stops recording. Resuming carries on from the frozen history with no gap |
 | Invert | Flips both axes to show the felt force (the push you feel) instead of the device's own movement. Off by default, applies to the existing history too, and is remembered |
-| Peak | Cycles Off → Pin → Lines. **Pin** marks the biggest moment on the road (combined X/Z) with a dashed pole, a ring and its value. **Lines** draws one dashed line per axis along the whole road at that axis's biggest value, on the side it happened, labelled at the −20s end. Both cover only what's on the road, so they update as moments scroll off. Off by default, and remembered |
+| Peak | Draws one dashed line per axis along the whole road at that axis's biggest value on the road right now, on the side it happened, labelled at the −20s end. The lines update as moments scroll off. Off by default, and remembered |
 | Axes | Shows or hides the X/Z arrows at the record head. On by default, and remembered |
 | Keep Awake | Holds a screen wake lock while the page is visible |
 | Smoothing | 0.15s low-pass on both axes. On by default |

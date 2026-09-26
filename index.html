@@ -171,7 +171,7 @@
 
 <header>
   <h1>Scroll Report</h1>
-  <span id="version">v2.3.0 · 2026-09-26</span>
+  <span id="version">v2.4.0 · 2026-09-26</span>
   <span id="status">Waiting</span>
 </header>
 
@@ -261,8 +261,8 @@
 
   let started = false, hidden = false;
   let optSmooth = true, optWake = false, optInvert = false, optAxes = true;
-  let optPeak = 'off';
-  let peakBin = -1, peakX = 0, peakZ = 0;
+  let optPeak = false;
+  let peakX = 0, peakZ = 0;
   let theme = document.documentElement.dataset.theme || 'auto';
   try {
     const saved = JSON.parse(localStorage.getItem('scroll-report-cam') || 'null');
@@ -275,7 +275,7 @@
     optInvert = localStorage.getItem('scroll-report-invert') === '1';
     optAxes = localStorage.getItem('scroll-report-axes') !== '0';
     const pk = localStorage.getItem('scroll-report-peak');
-    optPeak = pk === 'pin' || pk === '1' ? 'pin' : pk === 'lines' ? 'lines' : 'off';
+    optPeak = pk === '1' || pk === 'pin' || pk === 'lines';
   } catch (e) {}
   let wakeLock = null;
 
@@ -632,6 +632,14 @@
     ctx.textAlign = 'left';
     project(F, 0, 0);
     if (PV) ctx.fillText(F + 'G', Math.min(PX + 4, W - 30), PY + 8);
+    // Z gets the same full-scale mark: a short tick at +0.5G above the head.
+    project(0, F, 0);
+    if (PV) {
+      ctx.strokeStyle = colors.grid;
+      ctx.lineWidth = 1;
+      line(PX - 4, PY, PX + 4, PY);
+      ctx.fillText(F + 'G', Math.min(PX + 7, W - 30), PY);
+    }
   }
 
   function drawAxes() {
@@ -639,7 +647,7 @@
     project(0, 0, 0);
     const ox = PX, oy = PY;
     if (!PV) return;
-    const axes = [['X', colors.x, L, 0], ['Z', colors.z, 0, L / Z_GAIN]];
+    const axes = [['X', colors.x, L, 0], ['Z', colors.z, 0, L]];
     ctx.lineWidth = 1.5;
     ctx.font = '600 11px -apple-system, sans-serif';
     ctx.textAlign = 'center';
@@ -684,16 +692,13 @@
       binZ[b] = clampG(inv * binZ[b] / n);
     }
 
-    // The peak only covers what's on the road right now, so it scrolls off
-    // with its moment and hands over to the next biggest.
-    peakBin = -1; peakX = 0; peakZ = 0;
-    let peakM = 0;
+    // Peaks only cover what's on the road right now, so they update as a
+    // big moment scrolls off the end.
+    peakX = 0; peakZ = 0;
     for (let b = 0; b < bins && binF[b] <= 1; b++) {
       if (!binN[b]) continue;
       if (Math.abs(binX[b]) > Math.abs(peakX)) peakX = binX[b];
       if (Math.abs(binZ[b]) > Math.abs(peakZ)) peakZ = binZ[b];
-      const m = Math.hypot(binX[b], binZ[b]);
-      if (m > peakM) { peakM = m; peakBin = b; }
     }
   }
 
@@ -726,39 +731,6 @@
       ctx.fillStyle = color;
       ctx.fillText(label, lx, ly);
     }
-  }
-
-  function drawPeakPin() {
-    const b = peakBin;
-    if (b < 0) return;
-    const m = Math.hypot(binX[b], binZ[b]);
-    if (m < 0.005) return;
-    const f = binF[b];
-    project(binX[b], 0, f);
-    if (!PV) return;
-    const gx = PX, gy = PY;
-    project(binX[b], binZ[b], f);
-    if (!PV) return;
-    const px = PX, py = PY;
-    const top = Math.min(py, gy) - 26;
-    ctx.strokeStyle = colors.fg;
-    ctx.globalAlpha = 0.7;
-    ctx.lineWidth = 1;
-    ctx.setLineDash([3, 3]);
-    line(gx, gy, gx, top);
-    ctx.setLineDash([]);
-    ctx.globalAlpha = 1;
-    ctx.beginPath();
-    ctx.arc(px, py, 4, 0, Math.PI * 2);
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    ctx.font = '600 11px -apple-system, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'bottom';
-    ctx.fillStyle = colors.fg;
-    const label = '▲ ' + m.toFixed(2) + 'G';
-    const half = ctx.measureText(label).width / 2 + 4;
-    ctx.fillText(label, Math.min(W - half, Math.max(half, gx)), top - 2);
   }
 
   function drawRibbon(now) {
@@ -954,8 +926,7 @@
     drawFloor(now);
     if (optAxes) drawAxes();
     if (started) drawRibbon(now);
-    if (started && optPeak === 'lines') drawPeakLines();
-    if (started && optPeak === 'pin') drawPeakPin();
+    if (started && optPeak) drawPeakLines();
     drawPlane(now);
   }
 
@@ -1056,15 +1027,11 @@
     draw();
   });
 
-  function showPeak() {
-    btnPeak.textContent = optPeak === 'off' ? 'Peak' : 'Peak: ' + optPeak[0].toUpperCase() + optPeak.slice(1);
-    btnPeak.setAttribute('aria-pressed', String(optPeak !== 'off'));
-  }
-  showPeak();
+  btnPeak.setAttribute('aria-pressed', String(optPeak));
   btnPeak.addEventListener('click', () => {
-    optPeak = optPeak === 'off' ? 'pin' : optPeak === 'pin' ? 'lines' : 'off';
-    showPeak();
-    try { localStorage.setItem('scroll-report-peak', optPeak); } catch (e) {}
+    optPeak = !optPeak;
+    btnPeak.setAttribute('aria-pressed', String(optPeak));
+    try { localStorage.setItem('scroll-report-peak', optPeak ? '1' : '0'); } catch (e) {}
     if (!rafId) draw();
   });
 
