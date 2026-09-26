@@ -187,7 +187,7 @@
 
 <header>
   <h1>Scroll Report</h1>
-  <span id="version">v2.6.0 · 2026-09-26</span>
+  <span id="version">v2.6.1 · 2026-09-26</span>
   <span id="status">Waiting</span>
 </header>
 
@@ -237,6 +237,17 @@
   const DRAG_RAD_PER_PX = 0.008;
   const TWEEN_MS = 450;
 
+  // These are "how it felt" cues, not the aircraft's real attitude: a small
+  // bank toward the sideways push, plus a wobble sized by how rough the last
+  // half second was.
+  const LEAN_TAU = 0.4;
+  const LEAN_MAX = 12 * Math.PI / 180;
+  const LEAN_FULL_G = 0.3;
+  const CALM_TAU = 0.3;
+  const ROUGH_TAU = 0.5;
+  const WOBBLE_MAX = 10 * Math.PI / 180;
+  const ROUGH_FULL_G = 0.15;
+
   // tf: where along the road the camera aims (fraction of the window).
   // oy: where that aim point lands on screen (fraction of the height).
   // aspect: how wide the scene is, so the zoom can use landscape width.
@@ -276,24 +287,31 @@
   const C = {};
   let colors = {};
 
+  // Storage can throw (private mode, blocked site data), so every access
+  // goes through these.
+  function stored(key) {
+    try { return localStorage.getItem('scroll-report-' + key); } catch (e) { return null; }
+  }
+  function store(key, value) {
+    try { localStorage.setItem('scroll-report-' + key, value); } catch (e) {}
+  }
+
   let started = false, hidden = false;
-  let optSmooth = true, optWake = false, optInvert = false, optAxes = true;
-  let optPeak = false;
+  let optSmooth = true, optWake = false, optPeak = false;
+  let optInvert = stored('invert') === '1';
+  let optAxes = stored('axes') !== '0';
   let peakX = 0, peakZ = 0;
   let theme = document.documentElement.dataset.theme || 'auto';
   try {
-    const saved = JSON.parse(localStorage.getItem('scroll-report-cam') || 'null');
+    const saved = JSON.parse(stored('cam'));
     const i = saved ? PRESETS.findIndex(p => p.id === saved.preset) : -1;
     if (i >= 0) { presetIdx = i; cam = { ...PRESETS[i] }; }
     if (saved && saved.custom) {
       for (const k of ['yaw', 'pitch']) if (typeof saved[k] === 'number') cam[k] = saved[k];
       customCam = true;
     }
-    optInvert = localStorage.getItem('scroll-report-invert') === '1';
-    optAxes = localStorage.getItem('scroll-report-axes') !== '0';
-    localStorage.removeItem('scroll-report-peak');
-    if (localStorage.getItem('scroll-report-dragged') === '1') document.documentElement.classList.add('dragged');
   } catch (e) {}
+  if (stored('dragged') === '1') document.documentElement.classList.add('dragged');
   let wakeLock = null;
 
   let smX = 0, smZ = 0;
@@ -330,7 +348,7 @@
   // Theme
 
   function hexToRgb(hex) {
-    const n = parseInt(hex.trim().slice(1), 16);
+    const n = parseInt(hex.slice(1), 16);
     return [n >> 16 & 255, n >> 8 & 255, n & 255];
   }
 
@@ -345,13 +363,17 @@
     };
   }
 
+  function showTheme() {
+    btnTheme.textContent = 'Theme: ' + theme[0].toUpperCase() + theme.slice(1);
+  }
+
   function applyTheme() {
     if (theme === 'auto') delete document.documentElement.dataset.theme;
     else document.documentElement.dataset.theme = theme;
-    btnTheme.textContent = 'Theme: ' + theme[0].toUpperCase() + theme.slice(1);
-    try { localStorage.setItem('scroll-report-theme', theme); } catch (e) {}
+    showTheme();
+    store('theme', theme);
     readColors();
-    draw();
+    drawIfIdle();
   }
 
   btnTheme.addEventListener('click', () => {
@@ -360,10 +382,8 @@
   });
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
     readColors();
-    draw();
+    drawIfIdle();
   });
-
-  // Geometry
 
   // Camera
 
@@ -401,18 +421,26 @@
     draw();
   }
 
-  function redraw() {
-    updateCamera();
+  // The animation loop redraws every frame; outside it (before start, paused,
+  // hidden) changes have to draw themselves.
+  function drawIfIdle() {
     if (!rafId) draw();
   }
 
-  function saveCam() {
+  function redraw() {
+    updateCamera();
+    drawIfIdle();
+  }
+
+  function showView() {
     btnView.textContent = 'View: ' + (customCam ? 'Free' : PRESETS[presetIdx].label);
-    try {
-      localStorage.setItem('scroll-report-cam', JSON.stringify({
-        preset: PRESETS[presetIdx].id, custom: customCam, yaw: cam.yaw, pitch: cam.pitch,
-      }));
-    } catch (e) {}
+  }
+
+  function saveCam() {
+    showView();
+    store('cam', JSON.stringify({
+      preset: PRESETS[presetIdx].id, custom: customCam, yaw: cam.yaw, pitch: cam.pitch,
+    }));
   }
 
   function tweenStep() {
@@ -454,7 +482,7 @@
     if (!customCam) { customCam = true; saveCam(); }
     if (!document.documentElement.classList.contains('dragged')) {
       document.documentElement.classList.add('dragged');
-      try { localStorage.setItem('scroll-report-dragged', '1'); } catch (e) {}
+      store('dragged', '1');
     }
     redraw();
   });
@@ -704,35 +732,30 @@
     }
     const inv = optInvert ? -1 : 1;
     const offset = now / binMs - newest;
+    peakX = 0; peakZ = 0;
     for (let b = 0; b < bins; b++) {
       // binF[b]: bin b's older edge, as a fraction of the way down the road.
       binF[b] = (b + offset) / bins;
       const n = binN[b];
       if (!n) continue;
-      binX[b] = clampG(inv * binX[b] / n);
-      binZ[b] = clampG(inv * binZ[b] / n);
-    }
-
-    // Peaks only cover what's on the road right now, so they update as a
-    // big moment scrolls off the end.
-    peakX = 0; peakZ = 0;
-    for (let b = 0; b < bins && binF[b] <= 1; b++) {
-      if (!binN[b]) continue;
-      if (Math.abs(binX[b]) > Math.abs(peakX)) peakX = binX[b];
-      if (Math.abs(binZ[b]) > Math.abs(peakZ)) peakZ = binZ[b];
+      const x = binX[b] = clampG(inv * binX[b] / n);
+      const z = binZ[b] = clampG(inv * binZ[b] / n);
+      // Peaks only cover what's on the road right now.
+      if (binF[b] > 1) continue;
+      if (Math.abs(x) > Math.abs(peakX)) peakX = x;
+      if (Math.abs(z) > Math.abs(peakZ)) peakZ = z;
     }
   }
 
   // One dashed line per axis along the whole road, on the side that axis
   // peaked. Labels sit at the −20s end, clear of the plane and axis labels.
   function drawPeakLines() {
-    const lines = [[peakX, 0, colors.x, 'X'], [0, peakZ, colors.z, 'Z']];
+    const lines = [[peakX, 0, peakX, colors.x, 'X'], [0, peakZ, peakZ, colors.z, 'Z']];
     ctx.font = '600 10px -apple-system, sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     let prev = null;
-    for (const [x, z, color, name] of lines) {
-      const v = name === 'X' ? x : z;
+    for (const [x, z, v, color, name] of lines) {
       if (Math.abs(v) < 0.005) continue;
       ctx.strokeStyle = color;
       ctx.globalAlpha = 0.8;
@@ -821,16 +844,6 @@
 
   const PLANE_SCALE = 0.75;
 
-  // These are "how it felt" cues, not the aircraft's real attitude: a small
-  // bank toward the sideways push, plus a wobble sized by how rough the last
-  // half second was.
-  const LEAN_TAU = 0.4;
-  const LEAN_MAX = 12 * Math.PI / 180;
-  const LEAN_FULL_G = 0.3;
-  const CALM_TAU = 0.3;
-  const ROUGH_TAU = 0.5;
-  const WOBBLE_MAX = 10 * Math.PI / 180;
-  const ROUGH_FULL_G = 0.15;
 
   const att = { cr: 1, sr: 0, cp: 1, sp: 0 };
 
@@ -859,10 +872,10 @@
   }
 
   function drawPlane(now) {
+    const inv = optInvert ? -1 : 1;
     let x = 0, z = 0, live = false;
     if (count) {
       const k = (head - 1 + CAP) % CAP;
-      const inv = optInvert ? -1 : 1;
       x = clampG(inv * bufX[k]);
       z = clampG(inv * bufZ[k]);
       live = started && now - bufT[k] <= STALL_MS;
@@ -870,7 +883,6 @@
     const ox = x, oy = 0, oz = z * Z_GAIN;
 
     if (live) {
-      const inv = optInvert ? -1 : 1;
       const lean = LEAN_MAX * Math.max(-1, Math.min(1, inv * leanX / LEAN_FULL_G));
       const wob = WOBBLE_MAX * Math.min(1, Math.sqrt(roughE) / ROUGH_FULL_G);
       const t = now / 1000 * 2 * Math.PI;
@@ -909,12 +921,10 @@
     // Painter's order: farthest part first, whichever side the camera is on.
     const color = live ? lerpColor(1, 1) : colors.muted;
     const parts = [];
-    for (const name of ['wing', 'tail', 'fin']) {
+    for (const name in PLANE) {
       const d = planePath(PLANE[name], ox, oy, oz, false);
       if (d >= 0) parts.push([d, name]);
     }
-    const bd = planePath(PLANE.body, ox, oy, oz, false);
-    if (bd >= 0) parts.push([bd, 'body']);
     parts.sort((a, b) => b[0] - a[0]);
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
@@ -1013,12 +1023,31 @@
     wakeLock = null;
   }
 
+  // Wires an on/off button to its aria-pressed state, and remembers it when
+  // given a storage key.
+  function toggle(btn, on, key, apply) {
+    btn.setAttribute('aria-pressed', String(on));
+    btn.addEventListener('click', () => {
+      // Read back from the button, which a refused wake lock can switch off.
+      on = btn.getAttribute('aria-pressed') !== 'true';
+      btn.setAttribute('aria-pressed', String(on));
+      if (key) store(key, on ? '1' : '0');
+      apply(on);
+      drawIfIdle();
+    });
+  }
+
   if (!('wakeLock' in navigator)) btnWake.disabled = true;
-  btnWake.addEventListener('click', () => {
-    optWake = !optWake;
-    btnWake.setAttribute('aria-pressed', String(optWake));
-    if (optWake) acquireWake(); else releaseWake();
+  toggle(btnWake, optWake, null, v => {
+    optWake = v;
+    if (v) acquireWake(); else releaseWake();
   });
+  toggle(btnSmooth, optSmooth, null, v => { optSmooth = v; });
+  toggle(btnPeak, optPeak, null, v => { optPeak = v; });
+  toggle(btnAxes, optAxes, 'axes', v => { optAxes = v; });
+  // Invert draws the felt force (what pushes you) instead of the device's own
+  // acceleration. It's applied at draw time, so history flips with it.
+  toggle(btnInvert, optInvert, 'invert', v => { optInvert = v; });
 
   btnPause.addEventListener('click', () => {
     paused = !paused;
@@ -1027,7 +1056,7 @@
     if (paused) {
       pausedAt = performance.now();
       stopLoop();
-      draw();
+      drawIfIdle();
     } else {
       pausedTotal += performance.now() - pausedAt;
       lastSample = 0;
@@ -1036,36 +1065,6 @@
       startLoop();
     }
     refreshStatus();
-  });
-
-  // Invert draws the felt force (what pushes you) instead of the device's
-  // own acceleration. It's applied at draw time so history flips with it.
-  btnInvert.setAttribute('aria-pressed', String(optInvert));
-  btnInvert.addEventListener('click', () => {
-    optInvert = !optInvert;
-    btnInvert.setAttribute('aria-pressed', String(optInvert));
-    try { localStorage.setItem('scroll-report-invert', optInvert ? '1' : '0'); } catch (e) {}
-    draw();
-  });
-
-  btnPeak.setAttribute('aria-pressed', String(optPeak));
-  btnPeak.addEventListener('click', () => {
-    optPeak = !optPeak;
-    btnPeak.setAttribute('aria-pressed', String(optPeak));
-    if (!rafId) draw();
-  });
-
-  btnAxes.setAttribute('aria-pressed', String(optAxes));
-  btnAxes.addEventListener('click', () => {
-    optAxes = !optAxes;
-    btnAxes.setAttribute('aria-pressed', String(optAxes));
-    try { localStorage.setItem('scroll-report-axes', optAxes ? '1' : '0'); } catch (e) {}
-    if (!rafId) draw();
-  });
-
-  btnSmooth.addEventListener('click', () => {
-    optSmooth = !optSmooth;
-    btnSmooth.setAttribute('aria-pressed', String(optSmooth));
   });
 
   document.addEventListener('visibilitychange', () => {
@@ -1084,8 +1083,8 @@
   new ResizeObserver(resize).observe(canvas);
 
   readColors();
-  btnTheme.textContent = 'Theme: ' + theme[0].toUpperCase() + theme.slice(1);
-  saveCam();
+  showTheme();
+  showView();
   resize();
 })();
 </script>
