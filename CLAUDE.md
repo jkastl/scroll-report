@@ -12,3 +12,5 @@ from `main`. See README.md for behavior.
 - Keep README.md in sync with behavior changes.
 - Theme colors live in CSS custom properties. The dark palette is declared twice (for the
   `data-theme="dark"` override and the `prefers-color-scheme` media query), so edit both.
+- README.md has an **Open checks** list of things waiting on real-device testing. Mention
+  any that relate to the area you're changing, and update the list when one is settled.

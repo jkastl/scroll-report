@@ -88,3 +88,11 @@ permission). A desktop browser renders the empty scene only. Push to `main` to
 deploy through GitHub Pages.
 
 Versioning is semver, shown in the header next to the release date.
+
+## Open checks
+
+Things to verify on a real ride. Tick them off or remove them once settled.
+
+- [ ] **Wobble at cruise.** If the plane rocks noticeably in smooth cruise, the wobble
+  threshold is too low. Raise `ROUGH_FULL_G` in `index.html` (currently 0.15G, the
+  roughness that gives the full 10° wobble).
