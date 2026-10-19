@@ -6,8 +6,8 @@ seismograph. Drag to look at it from any angle.
 
 **[jkastl.github.io/scroll-report](https://jkastl.github.io/scroll-report/)**
 
-One file, no build step, no dependencies, no network calls beyond an anonymous visit count
-([GoatCounter](https://www.goatcounter.com/), no cookies).
+One file, no build step, no dependencies, no backend. The page loads an anonymous
+[GoatCounter](https://www.goatcounter.com/) visit counter (no cookies) and works without it.
 
 ## Reading it
 
